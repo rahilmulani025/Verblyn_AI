@@ -1,19 +1,55 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+
+interface GenerateTopicPayload {
+  primary_goal?: string;
+  target_role?: string;
+  active_weakness?: string;
+  weakest_skill?: string;
+  current_level?: number;
+  template_type?: string;
+  recent_prompts?: string[];
+}
+
+interface AnalyzeAttemptPayload {
+  challenge_title: string;
+  challenge_prompt: string;
+  target_skill: string;
+  target_weakness?: string;
+  time_limit_seconds: number;
+  success_criteria?: string[];
+  user_goal?: string;
+  transcript: string;
+  audio_base64?: string;
+  audio_mime_type?: string;
+  deterministic_metrics: {
+    durationSeconds: number;
+    wordCount: number;
+    wordsPerMinute: number;
+    fillerCount: number;
+    repetitionCount: number;
+    sentenceCount: number;
+    averageSentenceLength: number;
+    vocabularyDiversity: number;
+    isComplete: boolean;
+  };
+}
 
 interface RequestBody {
   action: "test_connection" | "generate_topic" | "analyze_attempt";
   gemini_api_key?: string;
-  payload?: any;
+  payload?: GenerateTopicPayload | AnalyzeAttemptPayload | Record<string, unknown>;
 }
 
 const GEMINI_MODEL = "gemini-2.5-flash";
 
-function buildSuccessResponse(action: string, data: any) {
+function buildSuccessResponse(action: string, data: unknown) {
   return new Response(
     JSON.stringify({
       success: true,
@@ -41,29 +77,87 @@ function buildErrorResponse(message: string, code = "AI_SERVICE_ERROR", status =
   );
 }
 
+function mapGeminiStatusToCode(status: number): { code: string; message: string } {
+  if (status === 400 || status === 401 || status === 403) {
+    return {
+      code: "INVALID_API_KEY",
+      message: "Gemini rejected this API key. Check the key and your Google AI Studio permissions.",
+    };
+  }
+  if (status === 429) {
+    return {
+      code: "QUOTA_EXCEEDED",
+      message: "Your Gemini API quota limit has been reached. Please retry in a few moments.",
+    };
+  }
+  if (status >= 500) {
+    return {
+      code: "GEMINI_PROVIDER_ERROR",
+      message: "Google Gemini service encountered an error. Please try again.",
+    };
+  }
+  return {
+    code: "GEMINI_SERVICE_ERROR",
+    message: "Failed to communicate with AI provider.",
+  };
+}
+
 serve(async (req: Request) => {
+  // 1. Handle CORS Preflight
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   try {
+    // 2. Validate Authenticated Supabase User Context
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+      return buildErrorResponse("Unauthorized. Authentication token is required.", "UNAUTHORIZED", 401);
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") || "";
+
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+
+    const {
+      data: { user },
+      error: userAuthError,
+    } = await supabase.auth.getUser();
+
+    if (userAuthError || !user) {
+      return buildErrorResponse("Unauthorized. Invalid authentication session.", "UNAUTHORIZED", 401);
+    }
+
+    // 3. Parse & Validate Request Body
     const body: RequestBody = await req.json();
     const apiKey = body.gemini_api_key?.trim();
 
     if (!apiKey) {
-      return buildErrorResponse("Gemini API key is required. Please provide your API key in Settings -> AI Coach.", "MISSING_API_KEY", 401);
+      return buildErrorResponse(
+        "Gemini API key is required. Please provide your API key in Settings -> AI Coach.",
+        "MISSING_API_KEY",
+        400
+      );
     }
 
-    const { action, payload } = body;
+    const { action } = body;
 
-    // 1. ACTION: TEST_CONNECTION
+    // Base URL for Gemini API (key is passed securely via x-goog-api-key header, NOT in URL query string)
+    const geminiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+
+    // 4. ACTION: TEST_CONNECTION
     if (action === "test_connection") {
       const startTime = Date.now();
-      const testUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
-      const res = await fetch(testUrl, {
+      const res = await fetch(geminiEndpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
         body: JSON.stringify({
           contents: [{ parts: [{ text: "Respond with the single word 'READY' if you are active." }] }],
         }),
@@ -72,9 +166,8 @@ serve(async (req: Request) => {
       const latencyMs = Date.now() - startTime;
 
       if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        const errMsg = errJson?.error?.message || `Gemini API returned status ${res.status}`;
-        return buildErrorResponse(errMsg, "GEMINI_AUTH_ERROR", res.status);
+        const mapped = mapGeminiStatusToCode(res.status);
+        return buildErrorResponse(mapped.message, mapped.code, res.status);
       }
 
       return buildSuccessResponse("test_connection", {
@@ -85,9 +178,9 @@ serve(async (req: Request) => {
       });
     }
 
-    // 2. ACTION: GENERATE_TOPIC
+    // 5. ACTION: GENERATE_TOPIC
     if (action === "generate_topic") {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+      const payload = (body.payload || {}) as GenerateTopicPayload;
 
       const systemInstruction = `You are Verblyn's expert communication coach.
 Generate a tailored, high-impact speaking challenge for a professional/student based on their profile.
@@ -99,8 +192,8 @@ Return STRICT JSON adhering to this schema:
   "challenge_type": string,
   "target_skill": "Fluency" | "Clarity" | "Vocabulary" | "Grammar" | "Confidence",
   "target_weakness": string,
-  "difficulty": number (1-5),
-  "time_limit_seconds": number (30-180),
+  "difficulty": number,
+  "time_limit_seconds": number,
   "success_criteria": string[],
   "why_this_challenge": string,
   "follow_up_question": string,
@@ -108,19 +201,22 @@ Return STRICT JSON adhering to this schema:
 }`;
 
       const userContent = `User Profile:
-- Goal: ${payload?.primary_goal || "Everyday Communication"}
-- Target Role: ${payload?.target_role || "Professional / Student"}
-- Active Weakness: ${payload?.active_weakness || "Filler words & hesitation"}
-- Weakest Skill: ${payload?.weakest_skill || "Fluency"}
-- Current Level: ${payload?.current_level || 1}
-- Preferred Template/Archetype: ${payload?.template_type || "Explain Simply"}
-- Recent Prompts to avoid repeating: ${JSON.stringify(payload?.recent_prompts || [])}
+- Goal: ${payload.primary_goal || "Everyday Communication"}
+- Target Role: ${payload.target_role || "Professional / Student"}
+- Active Weakness: ${payload.active_weakness || "Filler words & hesitation"}
+- Weakest Skill: ${payload.weakest_skill || "Fluency"}
+- Current Level: ${payload.current_level || 1}
+- Preferred Template/Archetype: ${payload.template_type || "Explain Simply"}
+- Recent Prompts to avoid repeating: ${JSON.stringify(payload.recent_prompts || [])}
 
 Generate one distinct, personalized speaking drill for this user.`;
 
-      const res = await fetch(url, {
+      const res = await fetch(geminiEndpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: systemInstruction }] },
           contents: [{ parts: [{ text: userContent }] }],
@@ -132,8 +228,8 @@ Generate one distinct, personalized speaking drill for this user.`;
       });
 
       if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        return buildErrorResponse(errJson?.error?.message || "Failed to generate topic with Gemini", "GENERATION_FAILED", res.status);
+        const mapped = mapGeminiStatusToCode(res.status);
+        return buildErrorResponse(mapped.message, mapped.code, res.status);
       }
 
       const resData = await res.json();
@@ -142,19 +238,23 @@ Generate one distinct, personalized speaking drill for this user.`;
         return buildErrorResponse("Gemini returned an empty response", "EMPTY_RESPONSE", 500);
       }
 
-      let parsed;
+      let parsed: unknown;
       try {
         parsed = JSON.parse(rawText);
-      } catch (parseErr) {
-        return buildErrorResponse("Failed to parse model JSON", "INVALID_JSON", 500);
+      } catch {
+        return buildErrorResponse("Failed to parse model output JSON", "INVALID_AI_RESPONSE", 500);
       }
 
       return buildSuccessResponse("generate_topic", parsed);
     }
 
-    // 3. ACTION: ANALYZE_ATTEMPT
+    // 6. ACTION: ANALYZE_ATTEMPT
     if (action === "analyze_attempt") {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+      const payload = (body.payload || {}) as AnalyzeAttemptPayload;
+
+      if (!payload.challenge_title || !payload.challenge_prompt) {
+        return buildErrorResponse("Missing challenge metadata in analyze_attempt payload", "INVALID_PAYLOAD", 400);
+      }
 
       const systemInstruction = `You are Verblyn's rigorous, honest AI vocal & communication coach.
 EVALUATION PRINCIPLES:
@@ -165,19 +265,19 @@ EVALUATION PRINCIPLES:
 5. Each improvement MUST quote the exact problem and provide an actionable correction.
 6. Return STRICT JSON with this schema:
 {
-  "overall_score": number (0-100),
+  "overall_score": number,
   "task_completion": {
-    "score": number (0-100),
+    "score": number,
     "completed": boolean,
     "explanation": string
   },
   "skills": {
-    "fluency": number (0-100),
-    "clarity": number (0-100),
-    "structure": number (0-100),
-    "vocabulary": number (0-100),
-    "grammar": number (0-100),
-    "confidence": number (0-100)
+    "fluency": number,
+    "clarity": number,
+    "structure": number,
+    "vocabulary": number,
+    "grammar": number,
+    "confidence": number
   },
   "strengths": [
     {
@@ -199,13 +299,13 @@ EVALUATION PRINCIPLES:
   "next_focus": string,
   "recommended_drill_type": string,
   "recommendation_reason": string,
-  "confidence_in_evaluation": number (0-100)
+  "confidence_in_evaluation": number
 }`;
 
-      const parts: any[] = [];
+      const parts: Array<Record<string, unknown>> = [];
 
-      // If audio base64 is provided, attach inline audio part
-      if (payload?.audio_base64) {
+      // Optional inline audio part
+      if (payload.audio_base64) {
         parts.push({
           inlineData: {
             mimeType: payload.audio_mime_type || "audio/webm",
@@ -215,47 +315,50 @@ EVALUATION PRINCIPLES:
       }
 
       const promptContext = `CHALLENGE DETAILS:
-- Title: ${payload?.challenge_title}
-- Prompt: "${payload?.challenge_prompt}"
-- Target Skill: ${payload?.target_skill}
-- Target Weakness: ${payload?.target_weakness || "None"}
-- Time Limit: ${payload?.time_limit_seconds}s
-- Success Criteria: ${JSON.stringify(payload?.success_criteria || [])}
-- User Goal: ${payload?.user_goal || "Professional Speaking"}
+- Title: ${payload.challenge_title}
+- Prompt: "${payload.challenge_prompt}"
+- Target Skill: ${payload.target_skill}
+- Target Weakness: ${payload.target_weakness || "None"}
+- Time Limit: ${payload.time_limit_seconds}s
+- Success Criteria: ${JSON.stringify(payload.success_criteria || [])}
+- User Goal: ${payload.user_goal || "Professional Speaking"}
 
 DETERMINISTIC MEASUREMENTS:
-- Word Count: ${payload?.deterministic_metrics?.wordCount}
-- Duration: ${payload?.deterministic_metrics?.durationSeconds}s
-- Pacing: ${payload?.deterministic_metrics?.wordsPerMinute} WPM
-- Filler Count: ${payload?.deterministic_metrics?.fillerCount}
-- Repetition Count: ${payload?.deterministic_metrics?.repetitionCount}
-- Sentence Count: ${payload?.deterministic_metrics?.sentenceCount}
-- Avg Sentence Length: ${payload?.deterministic_metrics?.averageSentenceLength} words
-- Vocabulary Diversity: ${payload?.deterministic_metrics?.vocabularyDiversity}
+- Word Count: ${payload.deterministic_metrics?.wordCount || 0}
+- Duration: ${payload.deterministic_metrics?.durationSeconds || 0}s
+- Pacing: ${payload.deterministic_metrics?.wordsPerMinute || 0} WPM
+- Filler Count: ${payload.deterministic_metrics?.fillerCount || 0}
+- Repetition Count: ${payload.deterministic_metrics?.repetitionCount || 0}
+- Sentence Count: ${payload.deterministic_metrics?.sentenceCount || 0}
+- Avg Sentence Length: ${payload.deterministic_metrics?.averageSentenceLength || 0} words
+- Vocabulary Diversity: ${payload.deterministic_metrics?.vocabularyDiversity || 0}
 
 TRANSCRIPT:
-"${payload?.transcript || ""}"
+"${payload.transcript || ""}"
 
 Evaluate the attempt rigorously according to the instructions.`;
 
       parts.push({ text: promptContext });
 
-      const res = await fetch(url, {
+      const res = await fetch(geminiEndpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: systemInstruction }] },
           contents: [{ parts }],
           generationConfig: {
-            temperature: 0.2, // Rigorous, deterministic evaluation
+            temperature: 0.2,
             responseMimeType: "application/json",
           },
         }),
       });
 
       if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        return buildErrorResponse(errJson?.error?.message || "Gemini evaluation request failed", "EVALUATION_FAILED", res.status);
+        const mapped = mapGeminiStatusToCode(res.status);
+        return buildErrorResponse(mapped.message, mapped.code, res.status);
       }
 
       const resData = await res.json();
@@ -264,18 +367,19 @@ Evaluate the attempt rigorously according to the instructions.`;
         return buildErrorResponse("Gemini returned an empty evaluation", "EMPTY_EVALUATION", 500);
       }
 
-      let parsed;
+      let parsed: unknown;
       try {
         parsed = JSON.parse(rawText);
-      } catch (parseErr) {
-        return buildErrorResponse("Failed to parse evaluation output JSON", "INVALID_JSON", 500);
+      } catch {
+        return buildErrorResponse("Failed to parse evaluation output JSON", "INVALID_AI_RESPONSE", 500);
       }
 
       return buildSuccessResponse("analyze_attempt", parsed);
     }
 
     return buildErrorResponse(`Unknown action: ${action}`, "INVALID_ACTION", 400);
-  } catch (error: any) {
-    return buildErrorResponse(error.message || "Internal server error", "INTERNAL_ERROR", 500);
+  } catch (error: unknown) {
+    const errorMsg = error instanceof Error ? error.message : "Internal server error";
+    return buildErrorResponse(errorMsg, "INTERNAL_ERROR", 500);
   }
 });
