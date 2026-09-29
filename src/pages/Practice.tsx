@@ -1,93 +1,141 @@
-import { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, RotateCcw, AlertTriangle, Sparkles } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { useAuth } from '@/hooks/useAuth';
-import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
-import { usePracticeSession } from '@/hooks/usePracticeSession';
 import { AppShell } from '@/components/layout/AppShell';
 import { PageContainer } from '@/components/layout/PageContainer';
-import MicrophoneButton from '@/components/practice/MicrophoneButton';
-import TopicCard from '@/components/practice/TopicCard';
-import PracticeTimer from '@/components/practice/PracticeTimer';
-import AnalysisResult from '@/components/practice/AnalysisResult';
+import { ChallengeCard } from '@/components/challenge/ChallengeCard';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { challengeApi } from '@/features/challenges/challenge.api';
+import { profileApi } from '@/features/profile/profile.api';
+import { progressApi } from '@/features/progress/progress.api';
+import { Challenge } from '@/features/challenges/challenge.types';
+import { supabase } from '@/integrations/supabase/client';
+import { analytics } from '@/lib/analytics';
+import {
+  ArrowRight,
+  RotateCcw,
+  Sparkles,
+  Zap,
+  Target,
+  Clock,
+  BookOpen,
+  Bot,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
 
-const Practice = () => {
+export const Practice: React.FC = () => {
   const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
-  const [recordingTime, setRecordingTime] = useState(0);
-  const recordingTimeRef = useRef(0);
-  
-  const {
-    isListening,
-    transcript,
-    interimTranscript,
-    startListening,
-    stopListening,
-    resetTranscript,
-    isSupported,
-    error: speechError
-  } = useSpeechRecognition();
+  const [catalog, setCatalog] = useState<Challenge[]>([]);
+  const [currentChallenge, setCurrentChallenge] = useState<Challenge | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [showFullLibrary, setShowFullLibrary] = useState(false);
+  const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+  const [aiNotice, setAiNotice] = useState<string | null>(null);
 
-  const {
-    topic,
-    analysis,
-    isLoadingTopic,
-    isAnalyzing,
-    generateTopic,
-    analyzeTranscript,
-    saveSession,
-    resetSession
-  } = usePracticeSession();
-
-  // Redirect to auth if not logged in
   useEffect(() => {
-    if (!authLoading && !user) {
-      navigate('/auth');
-    }
-  }, [user, authLoading, navigate]);
+    analytics.track('quick_practice_opened');
 
-  // Generate initial topic on mount
-  useEffect(() => {
-    if (user && !topic) {
-      generateTopic();
-    }
-  }, [user, topic, generateTopic]);
+    async function loadQuickPractice() {
+      try {
+        const [allChallenges, profile, progress] = await Promise.all([
+          challengeApi.getChallenges(),
+          profileApi.getProfile(),
+          progressApi.getProgress(),
+        ]);
 
-  const handleMicClick = () => {
-    if (isListening) {
-      stopListening();
-    } else {
-      resetTranscript();
-      resetSession();
-      setRecordingTime(0);
-      recordingTimeRef.current = 0;
-      startListening();
+        setCatalog(allChallenges);
+
+        // Smart selection based on weakness or lowest skill
+        const activeWeakness = progress.activeWeaknesses?.[0];
+        const lowestSkill = progress.skills
+          ? [...progress.skills].sort((a, b) => a.currentScore - b.currentScore)[0]
+          : undefined;
+
+        let recommended: Challenge | undefined;
+
+        if (activeWeakness) {
+          recommended = allChallenges.find(
+            (c) =>
+              c.targetWeakness?.toLowerCase() === activeWeakness.type.toLowerCase() ||
+              c.targetSkill.toLowerCase() === activeWeakness.skillName.toLowerCase()
+          );
+        }
+
+        if (!recommended && lowestSkill) {
+          recommended = allChallenges.find(
+            (c) => c.targetSkill.toLowerCase() === lowestSkill.skillName.toLowerCase()
+          );
+        }
+
+        if (!recommended && profile?.primaryGoal) {
+          recommended = allChallenges.find((c) => c.goalTags.includes(profile.primaryGoal!));
+        }
+
+        setCurrentChallenge(recommended || allChallenges[0] || null);
+      } catch (err) {
+        console.error('Error loading Quick Practice:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadQuickPractice();
+  }, []);
+
+  const handleNextQuickChallenge = () => {
+    if (catalog.length === 0) return;
+    const currentIndex = catalog.findIndex((c) => c.id === currentChallenge?.id);
+    const nextIndex = (currentIndex + 1) % catalog.length;
+    setCurrentChallenge(catalog[nextIndex]);
+    setAiNotice(null);
+  };
+
+  const handleStartPractice = () => {
+    if (!currentChallenge) return;
+    analytics.track('quick_practice_started', {
+      challenge_id: currentChallenge.id,
+      target_skill: currentChallenge.targetSkill,
+    });
+    navigate(`/challenge/${currentChallenge.id}`);
+  };
+
+  const handleGenerateAiTopic = async () => {
+    setIsGeneratingAi(true);
+    setAiNotice(null);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-topic', {
+        body: { mode: 'quick-practice' },
+      });
+
+      if (!error && data && data.topic) {
+        // Find closest matching challenge or create dynamic challenge
+        const matched = catalog.find((c) => c.targetSkill === 'Fluency') || catalog[0];
+        setCurrentChallenge({
+          ...matched,
+          id: `ai-custom-${Date.now()}`,
+          title: data.topic.title || 'AI Spontaneous Drill',
+          prompt: data.topic.prompt || data.topic.title,
+          shortDescription: 'Spontaneous prompt generated by AI coach.',
+          whyItMatters: 'Practicing unexpected prompts trains quick conversational synthesis.',
+        });
+        setAiNotice('Custom AI topic generated!');
+      } else {
+        handleNextQuickChallenge();
+        setAiNotice('Loaded next curated challenge from catalog.');
+      }
+    } catch {
+      handleNextQuickChallenge();
+      setAiNotice('Loaded next curated challenge from catalog.');
+    } finally {
+      setIsGeneratingAi(false);
     }
   };
 
-  const handleTimeUpdate = (seconds: number) => {
-    setRecordingTime(seconds);
-    recordingTimeRef.current = seconds;
-  };
-
-  const handleAnalyze = async () => {
-    const result = await analyzeTranscript(transcript);
-    if (result && user) {
-      await saveSession(transcript, recordingTimeRef.current, result);
-    }
-  };
-
-  const handleNewSession = () => {
-    resetTranscript();
-    resetSession();
-    setRecordingTime(0);
-    recordingTimeRef.current = 0;
-  };
-
-  if (authLoading) {
+  if (loading) {
     return (
-      <AppShell title="Practice">
+      <AppShell title="Quick Practice">
         <div className="flex-1 flex items-center justify-center min-h-[300px]">
           <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
         </div>
@@ -96,144 +144,116 @@ const Practice = () => {
   }
 
   return (
-    <AppShell title="Practice Studio">
+    <AppShell title="Quick Practice">
       <PageContainer className="space-y-4">
         {/* Header Intro */}
         <div className="space-y-1">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-semibold">
+            <Zap className="w-3.5 h-3.5" /> Instant Speaking Drill
+          </div>
           <h2 className="text-xl font-bold tracking-tight text-foreground">
-            Spontaneous Voice Drill
+            Quick Practice
           </h2>
-          <p className="text-xs text-muted-foreground">
-            Practice speaking on dynamically generated prompts with instant vocal feedback.
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            One focused challenge right now to keep your conversational momentum sharp.
           </p>
         </div>
 
-        {/* Browser support warning */}
-        {!isSupported && (
-          <div className="p-3.5 rounded-xl border border-yellow-500/30 bg-yellow-500/10">
-            <div className="flex items-start gap-2.5">
-              <AlertTriangle className="w-4 h-4 text-yellow-500 shrink-0 mt-0.5" />
-              <div>
-                <h3 className="font-semibold text-xs text-foreground">Browser Not Supported</h3>
-                <p className="text-xs text-muted-foreground">
-                  Speech recognition is best supported in Chrome, Edge, or Safari.
-                </p>
+        {/* 1. PRIMARY HERO RECOMMENDED CHALLENGE */}
+        {currentChallenge && (
+          <Card className="border border-primary/50 bg-gradient-to-br from-primary/15 via-primary/5 to-card shadow-md">
+            <CardContent className="p-5 space-y-4">
+              <div className="flex items-start justify-between gap-2">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold text-primary uppercase tracking-wider">
+                      {currentChallenge.targetSkill} Focus
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-secondary text-muted-foreground font-semibold">
+                      {currentChallenge.difficultyLabel}
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-bold text-foreground leading-snug">
+                    "{currentChallenge.prompt}"
+                  </h3>
+                </div>
+                <div className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-secondary text-foreground text-xs font-semibold shrink-0">
+                  <Clock className="w-3.5 h-3.5 text-muted-foreground" />
+                  <span>{currentChallenge.durationSeconds}s</span>
+                </div>
               </div>
-            </div>
-          </div>
+
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                {currentChallenge.whyItMatters}
+              </p>
+
+              {aiNotice && (
+                <div className="p-2.5 rounded-lg bg-primary/10 border border-primary/20 text-xs text-primary flex items-center gap-2">
+                  <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                  <span>{aiNotice}</span>
+                </div>
+              )}
+
+              {/* Primary Action Button */}
+              <div className="pt-2 space-y-2.5">
+                <Button
+                  onClick={handleStartPractice}
+                  className="w-full min-h-[48px] touch-target text-sm font-semibold gap-2 shadow-md"
+                >
+                  Start This Drill <ArrowRight className="w-4 h-4" />
+                </Button>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={handleNextQuickChallenge}
+                    className="flex-1 min-h-[42px] touch-target text-xs gap-1.5"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" /> Try Another Challenge
+                  </Button>
+
+                  <Button
+                    variant="ghost"
+                    onClick={handleGenerateAiTopic}
+                    disabled={isGeneratingAi}
+                    className="min-h-[42px] touch-target text-xs gap-1.5 text-muted-foreground hover:text-foreground"
+                  >
+                    <Bot className="w-3.5 h-3.5 text-primary" />
+                    {isGeneratingAi ? 'Generating...' : 'AI Topic'}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
-        {/* Speech error */}
-        {speechError && (
-          <div className="p-3.5 rounded-xl border border-rose-500/30 bg-rose-500/10">
-            <div className="flex items-start gap-2.5">
-              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-              <div>
-                <h3 className="font-semibold text-xs text-foreground">Error</h3>
-                <p className="text-xs text-muted-foreground">{speechError}</p>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* 2. OPTIONAL FULL 38-CHALLENGE ACCORDION */}
+        <div className="pt-2">
+          <Button
+            variant="ghost"
+            onClick={() => setShowFullLibrary(!showFullLibrary)}
+            className="w-full flex items-center justify-between text-xs text-muted-foreground hover:text-foreground p-3 rounded-xl border border-border/60 bg-card/50"
+          >
+            <span className="flex items-center gap-2 font-semibold">
+              <BookOpen className="w-4 h-4 text-primary" />
+              <span>Browse Full Challenge Library ({catalog.length} Drills)</span>
+            </span>
+            {showFullLibrary ? (
+              <ChevronUp className="w-4 h-4" />
+            ) : (
+              <ChevronDown className="w-4 h-4" />
+            )}
+          </Button>
 
-        <div className="space-y-4">
-          {/* Topic Card */}
-          <TopicCard
-            topic={topic}
-            isLoading={isLoadingTopic}
-            onGenerateNew={() => generateTopic()}
-          />
-
-          {/* Recording Section */}
-          {!analysis && (
-            <div className="p-5 rounded-2xl bg-card border border-border/70">
-              <div className="flex flex-col items-center gap-5">
-                <PracticeTimer
-                  isRunning={isListening}
-                  targetSeconds={topic?.recommended_time}
-                  onTimeUpdate={handleTimeUpdate}
+          {showFullLibrary && (
+            <div className="space-y-2.5 pt-3">
+              {catalog.map((c) => (
+                <ChallengeCard
+                  key={c.id}
+                  challenge={c}
+                  onSelect={(id) => navigate(`/challenge/${id}`)}
                 />
-
-                <MicrophoneButton
-                  isListening={isListening}
-                  isDisabled={!isSupported || isAnalyzing}
-                  onClick={handleMicClick}
-                />
-
-                <p className="text-xs text-muted-foreground text-center">
-                  {isListening 
-                    ? "Listening... Tap to stop" 
-                    : "Tap the microphone to start recording"}
-                </p>
-
-                {/* Transcript display */}
-                {(transcript || interimTranscript) && (
-                  <div className="w-full mt-2 p-3.5 rounded-xl bg-secondary/50 border border-border/40 text-xs">
-                    <h4 className="font-semibold text-foreground mb-1">Live Transcript:</h4>
-                    <p className="text-muted-foreground leading-relaxed">
-                      {transcript}
-                      {interimTranscript && (
-                        <span className="text-muted-foreground/60 italic"> {interimTranscript}</span>
-                      )}
-                    </p>
-                  </div>
-                )}
-
-                {/* Action buttons */}
-                {transcript && !isListening && (
-                  <div className="flex gap-2 w-full pt-2">
-                    <Button
-                      variant="outline"
-                      onClick={handleNewSession}
-                      className="flex-1 min-h-[44px] touch-target text-xs gap-1.5"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      Try Again
-                    </Button>
-                    <Button
-                      onClick={handleAnalyze}
-                      disabled={isAnalyzing}
-                      className="flex-1 min-h-[44px] touch-target text-xs gap-1.5 font-semibold"
-                    >
-                      {isAnalyzing ? (
-                        <>
-                          <div className="w-3.5 h-3.5 border-2 border-background border-t-transparent rounded-full animate-spin" />
-                          Analyzing...
-                        </>
-                      ) : (
-                        <>
-                          <Save className="w-3.5 h-3.5" />
-                          Analyze & Save
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Analysis Results */}
-          {analysis && (
-            <div className="space-y-4">
-              <AnalysisResult analysis={analysis} />
-              
-              <div className="flex flex-col gap-2 pt-2">
-                <Button
-                  onClick={handleNewSession}
-                  className="w-full min-h-[48px] touch-target text-sm font-semibold gap-2"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                  Practice Another Topic
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => navigate('/progress')}
-                  className="w-full min-h-[44px] touch-target text-xs gap-1.5"
-                >
-                  View Overall Progress
-                </Button>
-              </div>
+              ))}
             </div>
           )}
         </div>

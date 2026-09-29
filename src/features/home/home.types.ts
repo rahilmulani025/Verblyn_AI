@@ -22,8 +22,10 @@ export interface HomeLearningPayload {
   focusSkill: TargetSkill;
   focusRationale: string;
   dailyMission: DailyMissionState | null;
+  nextRecommendedDrill?: Challenge;
   streak: UserStreakInfo;
   level: UserLevelInfo;
   weeklyProgress: DayProgress[];
+  forYouDrills: Challenge[];
   practiceCatalog: Challenge[];
 }

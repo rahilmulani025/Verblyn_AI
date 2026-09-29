@@ -23,7 +23,13 @@ export type AnalyticsEventName =
   | 'weakness_detected'
   | 'weakness_improved'
   | 'feedback_submitted'
-  | 'session_ended';
+  | 'session_ended'
+  | 'quick_practice_opened'
+  | 'quick_practice_started'
+  | 'speech_recognition_restarted'
+  | 'speech_recognition_failed'
+  | 'challenge_transitioned'
+  | 'home_targeted_drills_viewed';
 
 export interface AnalyticsEvent {
   name: AnalyticsEventName;

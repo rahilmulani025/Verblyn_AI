@@ -17,6 +17,7 @@ import {
   Target,
   Zap,
   Award,
+  BookOpen,
 } from 'lucide-react';
 
 export const HomePage: React.FC = () => {
@@ -38,6 +39,9 @@ export const HomePage: React.FC = () => {
             target_skill: res.dailyMission.challenge.targetSkill,
           });
         }
+        analytics.track('home_targeted_drills_viewed', {
+          count: res.forYouDrills.length,
+        });
       }
     });
 
@@ -49,9 +53,15 @@ export const HomePage: React.FC = () => {
   if (loading) {
     return (
       <AppShell title="Verblyn Home">
-        <div className="flex-1 flex items-center justify-center min-h-[300px]">
-          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-        </div>
+        <PageContainer className="space-y-4">
+          <div className="h-12 w-48 bg-card animate-pulse rounded-xl" />
+          <div className="h-44 w-full bg-card animate-pulse rounded-2xl" />
+          <div className="grid grid-cols-2 gap-2.5">
+            <div className="h-20 bg-card animate-pulse rounded-xl" />
+            <div className="h-20 bg-card animate-pulse rounded-xl" />
+          </div>
+          <div className="h-28 bg-card animate-pulse rounded-2xl" />
+        </PageContainer>
       </AppShell>
     );
   }
@@ -59,6 +69,8 @@ export const HomePage: React.FC = () => {
   const mission = data?.dailyMission;
   const streak = data?.streak;
   const level = data?.level;
+  const nextDrill = data?.nextRecommendedDrill;
+  const forYouDrills = data?.forYouDrills || [];
 
   return (
     <AppShell
@@ -77,7 +89,7 @@ export const HomePage: React.FC = () => {
           </h2>
         </div>
 
-        {/* YOUR FOCUS PILLAR */}
+        {/* 1. ACTIVE FOCUS PILLAR */}
         <Card className="border border-border/70 bg-card">
           <CardContent className="p-3.5 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
@@ -97,7 +109,7 @@ export const HomePage: React.FC = () => {
           </CardContent>
         </Card>
 
-        {/* HERO: TODAY'S MISSION */}
+        {/* 2. PRIMARY HERO: TODAY'S MISSION */}
         {mission && (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -137,17 +149,40 @@ export const HomePage: React.FC = () => {
 
                 {/* Primary CTA */}
                 {mission.completed ? (
-                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between text-xs text-emerald-300 font-semibold">
-                    <span className="flex items-center gap-1.5">
-                      <CheckCircle2 className="w-4 h-4" /> Mission Completed Today!
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/challenge/${mission.challenge.id}`)}
-                      className="underline text-emerald-400 hover:text-white"
-                    >
-                      Re-drill
-                    </button>
+                  <div className="space-y-2 pt-1">
+                    <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between text-xs text-emerald-300 font-semibold">
+                      <span className="flex items-center gap-1.5">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" /> Today's Mission Completed!
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/challenge/${mission.challenge.id}`)}
+                        className="underline text-emerald-400 hover:text-white"
+                      >
+                        Re-drill
+                      </button>
+                    </div>
+
+                    {/* Next Recommended Practice when mission is done */}
+                    {nextDrill && (
+                      <div className="p-3 rounded-xl bg-card border border-primary/30 flex items-center justify-between gap-2">
+                        <div className="space-y-0.5 min-w-0">
+                          <span className="text-[10px] font-bold text-primary uppercase tracking-wider block">
+                            Next Recommended Practice
+                          </span>
+                          <h4 className="text-xs font-bold text-foreground truncate">
+                            {nextDrill.title}
+                          </h4>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => navigate(`/challenge/${nextDrill.id}`)}
+                          className="text-xs font-semibold shrink-0 gap-1"
+                        >
+                          Keep Practicing <ArrowRight className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <Button
@@ -166,7 +201,7 @@ export const HomePage: React.FC = () => {
           </div>
         )}
 
-        {/* GAMIFICATION & MOMENTUM STRIP */}
+        {/* 3. MOMENTUM & STREAK STRIP */}
         <div className="grid grid-cols-2 gap-2.5">
           {/* Streak Card */}
           <Card className="border border-border/70 bg-card">
@@ -202,7 +237,7 @@ export const HomePage: React.FC = () => {
           </Card>
         </div>
 
-        {/* WEEKLY ACTIVITY DOTS */}
+        {/* 4. WEEKLY ACTIVITY PROGRESS */}
         <Card className="border border-border/70 bg-card">
           <CardContent className="p-3.5 space-y-2">
             <div className="flex items-center justify-between text-xs">
@@ -233,27 +268,47 @@ export const HomePage: React.FC = () => {
           </CardContent>
         </Card>
 
-        {/* PRACTICE CATALOG */}
-        <div className="space-y-2 pt-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold uppercase tracking-wider text-foreground">
-              Targeted Drills
-            </span>
-            <span className="text-xs text-muted-foreground">
-              {data?.practiceCatalog.length} available
-            </span>
-          </div>
+        {/* 5. FOR YOU: 2-3 TAILORED DRILLS (NO MASSIVE SCROLL) */}
+        {forYouDrills.length > 0 && (
+          <div className="space-y-2.5 pt-1">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <span className="text-xs font-bold uppercase tracking-wider text-foreground">
+                  For You
+                </span>
+                <p className="text-[11px] text-muted-foreground">
+                  Personalized drills based on your goals and focus.
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => navigate('/practice')}
+                className="text-xs font-semibold text-primary hover:text-primary/90 gap-1 p-0 h-auto"
+              >
+                See All Practice <ArrowRight className="w-3.5 h-3.5" />
+              </Button>
+            </div>
 
-          <div className="space-y-2.5">
-            {data?.practiceCatalog.map((challenge) => (
-              <ChallengeCard
-                key={challenge.id}
-                challenge={challenge}
-                onSelect={(id) => navigate(`/challenge/${id}`)}
-              />
-            ))}
+            <div className="space-y-2.5">
+              {forYouDrills.map((challenge) => (
+                <ChallengeCard
+                  key={challenge.id}
+                  challenge={challenge}
+                  onSelect={(id) => navigate(`/challenge/${id}`)}
+                />
+              ))}
+            </div>
+
+            <Button
+              variant="outline"
+              onClick={() => navigate('/practice')}
+              className="w-full min-h-[44px] touch-target text-xs font-semibold gap-1.5 mt-2"
+            >
+              <BookOpen className="w-3.5 h-3.5" /> Explore All Practice Drills
+            </Button>
           </div>
-        </div>
+        )}
       </PageContainer>
     </AppShell>
   );

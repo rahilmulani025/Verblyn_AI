@@ -1,103 +1,76 @@
 import { supabase } from '@/integrations/supabase/client';
 import { challengeApi } from '@/features/challenges/challenge.api';
 import { profileApi } from '@/features/profile/profile.api';
+import { progressApi } from '@/features/progress/progress.api';
 import { GOAL_PRESETS } from '@/features/home/goals.api';
 import { calculateLevelFromXp } from '@/features/gamification/gamification.types';
 import { DayProgress, HomeLearningPayload } from './home.types';
-import { TargetSkill } from '@/features/challenges/challenge.types';
+import { Challenge, TargetSkill } from '@/features/challenges/challenge.types';
 
 export const homeApi = {
   /**
-   * Fetches the compact learning payload using authoritative V1 tables:
-   * daily_missions, xp_events, user_streaks, user_skills, user_goals.
+   * Fast, parallelized Home learning payload fetcher.
+   * Returns today's mission, streak, level, weekly momentum, and 2-3 tailored drills.
    */
   async getLearningHomeData(): Promise<HomeLearningPayload> {
     const today = new Date().toISOString().split('T')[0];
-    const { data: authData } = await supabase.auth.getUser();
-    const user = authData.user;
-    const profile = await profileApi.getProfile();
 
-    let currentStreak = 1;
-    let bestStreak = 1;
+    // 1. Fetch Auth User, Profile, Mission, Progress, and Catalog concurrently
+    const [authData, profile, missionData, progressData, fullCatalog] = await Promise.all([
+      supabase.auth.getUser(),
+      profileApi.getProfile(),
+      challengeApi.getDailyMission(),
+      progressApi.getProgress(),
+      challengeApi.getChallenges(),
+    ]);
+
+    const user = authData.data.user;
+
+    // 2. Compute Streak & XP
+    let currentStreak = progressData.currentStreak || 1;
+    let bestStreak = Math.max(currentStreak, progressData.bestStreak || 1);
     let lastActivityDate: string | null = null;
     let totalXp = 0;
 
     if (user) {
-      // 1. Authoritative Streak from user_streaks table
-      try {
-        const { data: streakData } = await supabase
+      // Parallelize streak and XP lookups
+      const [streakRes, xpRes] = await Promise.all([
+        supabase
           .from('user_streaks')
-          .select('*')
+          .select('current_streak, longest_streak, last_activity_date')
           .eq('user_id', user.id)
-          .maybeSingle();
-
-        if (streakData) {
-          currentStreak = streakData.current_streak || 1;
-          bestStreak = Math.max(currentStreak, streakData.longest_streak || 1);
-          lastActivityDate = streakData.last_activity_date;
-        } else {
-          // Fallback to user_progress
-          const { data: prog } = await supabase
-            .from('user_progress')
-            .select('*')
-            .eq('user_id', user.id)
-            .maybeSingle();
-          if (prog) {
-            currentStreak = prog.current_streak || 1;
-            bestStreak = prog.current_streak || 1;
-            lastActivityDate = prog.last_practice_date;
-          }
-        }
-      } catch (err) {
-        console.warn('Error reading user_streaks:', err);
-      }
-
-      // 2. Authoritative XP from xp_events table
-      try {
-        const { data: xpRows } = await supabase
+          .maybeSingle(),
+        supabase
           .from('xp_events')
           .select('xp_amount')
-          .eq('user_id', user.id);
+          .eq('user_id', user.id),
+      ]);
 
-        if (xpRows && xpRows.length > 0) {
-          totalXp = xpRows.reduce((sum, r) => sum + (r.xp_amount || 0), 0);
-        } else {
-          totalXp = Number(user.user_metadata?.total_xp) || 50;
-        }
-      } catch (err) {
-        console.warn('Error reading xp_events:', err);
+      if (streakRes.data) {
+        currentStreak = streakRes.data.current_streak || 1;
+        bestStreak = Math.max(currentStreak, streakRes.data.longest_streak || 1);
+        lastActivityDate = streakRes.data.last_activity_date;
+      }
+
+      if (xpRes.data && xpRes.data.length > 0) {
+        totalXp = xpRes.data.reduce((sum, r) => sum + (r.xp_amount || 0), 0);
+      } else {
         totalXp = Number(user.user_metadata?.total_xp) || 50;
       }
     }
 
     const levelInfo = calculateLevelFromXp(totalXp);
 
-    // 3. Authoritative Daily Mission from daily_missions table
-    const missionData = await challengeApi.getDailyMission();
-
-    // 4. Authoritative Focus Skill from user_skills
+    // 3. Determine Focus Skill
     let focusSkill: TargetSkill = (missionData?.challenge.targetSkill as TargetSkill) || 'Fluency';
-
-    if (user) {
-      try {
-        const { data: skills } = await supabase
-          .from('user_skills')
-          .select('skill_name, current_score')
-          .eq('user_id', user.id);
-
-        if (skills && skills.length > 0) {
-          // Find lowest scoring skill
-          const sorted = [...skills].sort((a, b) => (a.current_score || 0) - (b.current_score || 0));
-          if (sorted[0] && sorted[0].skill_name) {
-            focusSkill = sorted[0].skill_name as TargetSkill;
-          }
-        }
-      } catch (err) {
-        console.warn('Error reading user_skills:', err);
+    if (progressData.skills && progressData.skills.length > 0) {
+      const sortedSkills = [...progressData.skills].sort((a, b) => a.currentScore - b.currentScore);
+      if (sortedSkills[0]?.skillName) {
+        focusSkill = sortedSkills[0].skillName as TargetSkill;
       }
     }
 
-    // 5. Goal mapping
+    // 4. Goal mapping
     const matchedGoal = GOAL_PRESETS.find((g) => g.id === profile?.primaryGoal);
     const goalTitle = matchedGoal ? matchedGoal.title : 'Everyday Communication';
 
@@ -106,7 +79,7 @@ export const homeApi = {
         ? `Targeting ${profile.communicationStyleFocus[0].toLowerCase()} to accelerate your progress in ${goalTitle}.`
         : `Daily targeted drills to compound your speaking confidence.`;
 
-    // 6. Weekly Activity Progress (last 7 days)
+    // 5. Weekly Activity Progress (last 7 days)
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const weeklyProgress: DayProgress[] = [];
     const now = new Date();
@@ -128,8 +101,51 @@ export const homeApi = {
       });
     }
 
-    // 7. Practice catalog from challenges table
-    const catalog = await challengeApi.getChallenges();
+    // 6. Select exactly 2-3 "For You" targeted drills (NO massive 38-card scroll on Home)
+    const activeWeakness = progressData.activeWeaknesses?.[0];
+    const missionId = missionData?.challenge.id;
+
+    const forYouDrills: Challenge[] = [];
+    const remainingCatalog = fullCatalog.filter((c) => c.id !== missionId);
+
+    // Pick 1: Aligned with weakness / lowest skill
+    if (activeWeakness) {
+      const weaknessMatch = remainingCatalog.find(
+        (c) =>
+          c.targetWeakness?.toLowerCase() === activeWeakness.type.toLowerCase() ||
+          c.targetSkill.toLowerCase() === activeWeakness.skillName.toLowerCase()
+      );
+      if (weaknessMatch) forYouDrills.push(weaknessMatch);
+    } else {
+      const skillMatch = remainingCatalog.find(
+        (c) => c.targetSkill.toLowerCase() === focusSkill.toLowerCase()
+      );
+      if (skillMatch) forYouDrills.push(skillMatch);
+    }
+
+    // Pick 2: Goal alignment
+    if (profile?.primaryGoal) {
+      const goalMatch = remainingCatalog.find(
+        (c) => c.goalTags.includes(profile.primaryGoal!) && !forYouDrills.some((d) => d.id === c.id)
+      );
+      if (goalMatch) forYouDrills.push(goalMatch);
+    }
+
+    // Pick 3: Variety in another skill
+    const varietyMatch = remainingCatalog.find(
+      (c) => !forYouDrills.some((d) => d.id === c.id) && c.targetSkill !== focusSkill
+    );
+    if (varietyMatch) forYouDrills.push(varietyMatch);
+
+    // Fallback if needed to ensure 3 drills
+    while (forYouDrills.length < 3 && remainingCatalog.length > forYouDrills.length) {
+      const nextCandidate = remainingCatalog.find((c) => !forYouDrills.some((d) => d.id === c.id));
+      if (nextCandidate) forYouDrills.push(nextCandidate);
+      else break;
+    }
+
+    // Next recommended challenge for completed mission state
+    const nextRecommendedDrill = forYouDrills[0] || remainingCatalog[0];
 
     const hour = now.getHours();
     const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -141,6 +157,7 @@ export const homeApi = {
       focusSkill,
       focusRationale,
       dailyMission: missionData,
+      nextRecommendedDrill,
       streak: {
         currentStreak,
         bestStreak,
@@ -149,7 +166,8 @@ export const homeApi = {
       },
       level: levelInfo,
       weeklyProgress,
-      practiceCatalog: catalog,
+      forYouDrills,
+      practiceCatalog: forYouDrills,
     };
   },
 };
