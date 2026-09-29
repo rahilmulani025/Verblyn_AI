@@ -17,6 +17,8 @@ import {
   Zap,
 } from 'lucide-react';
 
+import { invalidateProfileCache } from '@/app/guards/useProfileState';
+
 interface ResultLocationState {
   metrics?: SpeechMetricsSummary;
   scores?: BaselineSkillBreakdown;
@@ -48,10 +50,13 @@ export const AssessmentResultPage: React.FC = () => {
           return;
         }
 
+        const userId = userData.user.id;
+
+        // 1. Check speaking_sessions
         const { data: session } = await supabase
           .from('speaking_sessions')
           .select('*')
-          .eq('user_id', userData.user.id)
+          .eq('user_id', userId)
           .eq('topic', 'Baseline Assessment')
           .order('created_at', { ascending: false })
           .limit(1)
@@ -87,6 +92,34 @@ export const AssessmentResultPage: React.FC = () => {
             durationSeconds: session.duration_seconds || 60,
             transcript: session.transcript || '',
           });
+        } else {
+          // 2. Fallback to user_skills
+          const { data: skills } = await supabase
+            .from('user_skills')
+            .select('skill_name, baseline_score, current_score')
+            .eq('user_id', userId);
+
+          if (skills && skills.length > 0) {
+            const skillMap: Record<string, number> = {};
+            skills.forEach((s) => {
+              skillMap[s.skill_name.toLowerCase()] = s.baseline_score || s.current_score || 70;
+            });
+
+            const fluency = skillMap['fluency'] || 75;
+            const clarity = skillMap['clarity'] || 78;
+            const vocabulary = skillMap['vocabulary'] || 74;
+            const grammar = skillMap['grammar'] || 72;
+            const confidence = skillMap['confidence'] || 76;
+            const overallScore = Math.round((fluency + clarity + vocabulary + grammar + confidence) / 5);
+
+            setStateData({
+              scores: { overallScore, fluency, clarity, vocabulary, grammar, confidence },
+              strength: 'Good baseline clarity with steady sentence structure.',
+              firstFocus: 'Pacing & Filler Reduction',
+              recommendedDrill: 'Practice replacing filler sounds with deliberate silence.',
+              durationSeconds: 60,
+            });
+          }
         }
       } catch (err) {
         console.error('Failed to load baseline session on refresh:', err);
@@ -238,7 +271,10 @@ export const AssessmentResultPage: React.FC = () => {
         {/* 5. NEXT STEP CTA */}
         <div className="pt-4 mt-auto">
           <Button
-            onClick={() => navigate('/home', { replace: true })}
+            onClick={() => {
+              invalidateProfileCache();
+              navigate('/home', { replace: true });
+            }}
             className="w-full min-h-[48px] touch-target text-sm font-semibold gap-2 shadow-md"
           >
             Start My First Challenge <ArrowRight className="w-4 h-4" />

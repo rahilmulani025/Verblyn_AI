@@ -1,5 +1,5 @@
 import React from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 
 // Guards
 import { AuthGuard, GuestGuard, OnboardingGuard, AssessmentGuard } from '@/app/guards';
@@ -39,6 +39,8 @@ export const AppRoutes: React.FC = () => {
       <Route element={<AssessmentGuard />}>
         <Route path="/assessment" element={<AssessmentPage />} />
       </Route>
+
+      {/* Baseline Result */}
       <Route path="/assessment/result" element={<AssessmentResultPage />} />
 
       {/* Protected App Shell Routes */}
@@ -49,7 +51,10 @@ export const AppRoutes: React.FC = () => {
         <Route path="/challenge/:id/result" element={<ChallengeResultPage />} />
         <Route path="/progress" element={<ProgressPage />} />
         <Route path="/progress/achievements" element={<AchievementsPage />} />
+        <Route path="/achievements" element={<Navigate to="/progress/achievements" replace />} />
+        <Route path="/me" element={<ProfilePage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/dashboard" element={<Navigate to="/home" replace />} />
       </Route>
 
       {/* Catch-all 404 Route */}
