@@ -3,7 +3,7 @@
  * Pure functions for transparent, reproducible metrics calculated directly from transcript and timing data.
  */
 
-// Common spoken filler words and verbal pausessds
+// Common spoken filler words and verbal pauses
 export const DEFAULT_FILLER_WORDS: readonly string[] = [
   'um',
   'uh',
