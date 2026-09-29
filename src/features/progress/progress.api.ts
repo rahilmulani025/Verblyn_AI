@@ -20,6 +20,9 @@ export const progressApi = {
         avgGrammarScore: 0,
         avgVocabularyScore: 0,
         overallMasteryScore: 0,
+        skills: [],
+        activeWeaknesses: [],
+        improvingWeaknesses: [],
         recentSessions: [],
       };
     }
