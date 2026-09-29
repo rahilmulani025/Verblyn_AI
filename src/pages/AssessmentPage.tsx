@@ -12,7 +12,6 @@ import { calculateSpeechMetrics } from '@/lib/metrics';
 import { invalidateProfileCache } from '@/app/guards/useProfileState';
 import { analytics } from '@/lib/analytics';
 import {
-  Mic,
   MicOff,
   RotateCcw,
   ArrowRight,
@@ -23,6 +22,7 @@ import {
 } from 'lucide-react';
 
 export const AssessmentPage: React.FC = () => {
+  // 1. Hooks & State
   const navigate = useNavigate();
   const prompt = assessmentApi.getBaselinePrompt();
 
@@ -35,6 +35,7 @@ export const AssessmentPage: React.FC = () => {
   const timerRef = useRef<number | null>(null);
   const countdownRef = useRef<number | null>(null);
 
+  // 2. Speech Recognition Hook
   const {
     isListening,
     transcript,
@@ -46,51 +47,13 @@ export const AssessmentPage: React.FC = () => {
     error: speechError,
   } = useSpeechRecognition();
 
-  // Track page start
-  useEffect(() => {
-    analytics.track('baseline_started');
-    return () => {
-      if (state === 'LISTENING' || state === 'READY') {
-        analytics.track('baseline_abandoned');
-      }
-    };
-  }, [state]);
+  // 3. Callback Handlers (Declared BEFORE any effects that reference them)
+  const handleStopSpeaking = useCallback(() => {
+    stopListening();
+    setState('PROCESSING');
+  }, [stopListening]);
 
-  // Handle Speech Error propagation
-  useEffect(() => {
-    if (speechError) {
-      setErrorMessage(speechError);
-      setState('IDLE');
-      if (timerRef.current) clearInterval(timerRef.current);
-    }
-  }, [speechError]);
-
-  // Handle active speaking timer
-  useEffect(() => {
-    if (state === 'LISTENING') {
-      timerRef.current = window.setInterval(() => {
-        setSeconds((s) => {
-          if (s >= 60) {
-            // Auto stop at 60s
-            handleStopSpeaking();
-            return 60;
-          }
-          return s + 1;
-        });
-      }, 1000);
-    } else {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-    }
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [state, handleStopSpeaking]);
-
-  // Start Countdown flow
-  const handleStartCountdown = () => {
+  const handleStartCountdown = useCallback(() => {
     setErrorMessage(null);
     resetTranscript();
     setSeconds(0);
@@ -108,14 +71,9 @@ export const AssessmentPage: React.FC = () => {
         setCountdown(count);
       }
     }, 1000);
-  };
+  }, [resetTranscript, startListening]);
 
-  const handleStopSpeaking = useCallback(() => {
-    stopListening();
-    setState('PROCESSING');
-  }, [stopListening]);
-
-  const handleReset = () => {
+  const handleReset = useCallback(() => {
     if (countdownRef.current) clearInterval(countdownRef.current);
     if (timerRef.current) clearInterval(timerRef.current);
     stopListening();
@@ -123,8 +81,52 @@ export const AssessmentPage: React.FC = () => {
     setSeconds(0);
     setErrorMessage(null);
     setState('IDLE');
-  };
+  }, [stopListening, resetTranscript]);
 
+  // 4. Effects
+  // Track page start & abandon
+  useEffect(() => {
+    analytics.track('baseline_started');
+    return () => {
+      if (state === 'LISTENING' || state === 'COUNTDOWN') {
+        analytics.track('baseline_abandoned');
+      }
+    };
+  }, [state]);
+
+  // Handle Speech Error propagation
+  useEffect(() => {
+    if (speechError) {
+      setErrorMessage(speechError);
+      setState('IDLE');
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+  }, [speechError]);
+
+  // Handle active speaking timer (60-second limit)
+  useEffect(() => {
+    if (state === 'LISTENING') {
+      timerRef.current = window.setInterval(() => {
+        setSeconds((s) => {
+          if (s >= 60) {
+            handleStopSpeaking();
+            return 60;
+          }
+          return s + 1;
+        });
+      }, 1000);
+    } else {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [state, handleStopSpeaking]);
+
+  // 5. Computed Metrics & Submit Handler
   const currentWords = (transcript || '').trim().split(/\s+/).filter(Boolean).length;
   const currentWpm = seconds > 0 ? Math.round((currentWords / seconds) * 60) : 0;
 
@@ -195,6 +197,7 @@ export const AssessmentPage: React.FC = () => {
     }
   };
 
+  // 6. Render
   return (
     <AppShell title="Baseline Assessment" showNav={false} showHeader={true}>
       <PageContainer className="flex-1 flex flex-col justify-between py-2 space-y-4">
@@ -240,6 +243,7 @@ export const AssessmentPage: React.FC = () => {
                 <span>{errorMessage}</span>
               </div>
               <button
+                type="button"
                 onClick={() => setErrorMessage(null)}
                 className="text-xs underline text-rose-300 hover:text-white"
               >
