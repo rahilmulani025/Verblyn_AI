@@ -39,11 +39,16 @@ function mapDbRowToChallenge(row: Tables<'challenges'>): Challenge {
   };
 }
 
+let cachedDbChallenges: Challenge[] | null = null;
+
 export const challengeApi = {
   /**
-   * Retrieves challenges from V1 challenges table, with catalog fallback.
+   * Retrieves challenges from V1 challenges table, with memory caching and catalog fallback.
    */
   async getChallenges(): Promise<Challenge[]> {
+    if (cachedDbChallenges && cachedDbChallenges.length > 0) {
+      return [...cachedDbChallenges];
+    }
     try {
       const { data, error } = await supabase
         .from('challenges')
@@ -52,12 +57,73 @@ export const challengeApi = {
         .order('difficulty_level', { ascending: true });
 
       if (!error && data && data.length > 0) {
-        return data.map(mapDbRowToChallenge);
+        cachedDbChallenges = data.map(mapDbRowToChallenge);
+        return [...cachedDbChallenges];
       }
     } catch (err) {
       console.warn('Could not read from challenges table, using catalog seed:', err);
     }
     return [...CHALLENGE_CATALOG];
+  },
+
+  /**
+   * Lightweight method for Home and Quick Practice to obtain 2-3 tailored drills
+   * without incurring full catalogue over-the-wire overhead.
+   */
+  async getRecommendedChallenges(
+    limit: number = 3,
+    options?: {
+      excludeId?: string;
+      focusSkill?: TargetSkill;
+      primaryGoal?: string;
+      targetWeakness?: string;
+    }
+  ): Promise<Challenge[]> {
+    const source = cachedDbChallenges && cachedDbChallenges.length > 0
+      ? cachedDbChallenges
+      : CHALLENGE_CATALOG;
+
+    const remaining = source.filter((c) => c.id !== options?.excludeId);
+    const selected: Challenge[] = [];
+
+    // 1. Weakness / Lowest Skill match
+    if (options?.targetWeakness) {
+      const wMatch = remaining.find(
+        (c) =>
+          c.targetWeakness?.toLowerCase() === options.targetWeakness?.toLowerCase() ||
+          c.targetSkill.toLowerCase() === options.targetWeakness?.toLowerCase()
+      );
+      if (wMatch) selected.push(wMatch);
+    } else if (options?.focusSkill) {
+      const sMatch = remaining.find(
+        (c) => c.targetSkill.toLowerCase() === options.focusSkill?.toLowerCase()
+      );
+      if (sMatch) selected.push(sMatch);
+    }
+
+    // 2. Goal match
+    if (options?.primaryGoal) {
+      const gMatch = remaining.find(
+        (c) => c.goalTags.includes(options.primaryGoal!) && !selected.some((s) => s.id === c.id)
+      );
+      if (gMatch) selected.push(gMatch);
+    }
+
+    // 3. Variety in another skill
+    const varietyMatch = remaining.find(
+      (c) => !selected.some((s) => s.id === c.id) && c.targetSkill !== options?.focusSkill
+    );
+    if (varietyMatch) selected.push(varietyMatch);
+
+    // 4. Fill to limit
+    for (const c of remaining) {
+      if (selected.length >= limit) break;
+      if (!selected.some((s) => s.id === c.id)) {
+        selected.push(c);
+      }
+    }
+
+    return selected.slice(0, limit);
   },
 
   /**

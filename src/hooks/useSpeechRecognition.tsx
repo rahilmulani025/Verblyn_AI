@@ -59,6 +59,7 @@ export interface UseSpeechRecognitionReturn {
   resetTranscript: () => void;
   isSupported: boolean;
   error: string | null;
+  getAudioBlob?: () => Blob | null;
 }
 
 export const useSpeechRecognition = (): UseSpeechRecognitionReturn => {
@@ -71,10 +72,15 @@ export const useSpeechRecognition = (): UseSpeechRecognitionReturn => {
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const shouldBeListeningRef = useRef<boolean>(false);
   const accumulatedTranscriptRef = useRef<string>('');
+  const lastProcessedFinalIndexRef = useRef<number>(-1);
   const restartAttemptsRef = useRef<number>(0);
   const restartTimerRef = useRef<number | null>(null);
+
+  // Microphone stream & MediaRecorder chunk collection
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordedAudioBlobRef = useRef<Blob | null>(null);
 
   const isSupported =
     typeof window !== 'undefined' &&
@@ -94,21 +100,27 @@ export const useSpeechRecognition = (): UseSpeechRecognitionReturn => {
     recognition.lang = 'en-US';
     recognition.maxAlternatives = 1;
 
+    // Reset instance-specific processed final result index
+    lastProcessedFinalIndexRef.current = -1;
+
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       let currentSessionFinal = '';
       let currentInterim = '';
 
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      for (let i = 0; i < event.results.length; i++) {
         const res = event.results[i];
         if (res.isFinal) {
-          currentSessionFinal += ' ' + res[0].transcript.trim();
+          // Process each final index at most ONCE for this instance
+          if (i > lastProcessedFinalIndexRef.current) {
+            currentSessionFinal += ' ' + res[0].transcript.trim();
+            lastProcessedFinalIndexRef.current = i;
+          }
         } else {
           currentInterim += ' ' + res[0].transcript;
         }
       }
 
       if (currentSessionFinal) {
-        // Append cleanly to accumulated transcript without duplicating
         const trimmed = currentSessionFinal.trim();
         if (trimmed) {
           const currentTotal = accumulatedTranscriptRef.current.trim();
@@ -129,18 +141,18 @@ export const useSpeechRecognition = (): UseSpeechRecognitionReturn => {
         console.warn('[Speech Recognition Event]', err);
       }
 
-      if (err === 'not-allowed') {
+      if (err === 'not-allowed' || err === 'service-not-allowed') {
         shouldBeListeningRef.current = false;
         setError('Microphone access denied. Please enable microphone permissions in your browser.');
         setIsListening(false);
-        analytics.track('speech_recognition_failed', { reason: 'not-allowed' });
+        analytics.track('speech_recognition_failed', { reason: err });
       } else if (err === 'no-speech') {
-        // Normal silence — do not stop user recording session
+        // Normal silence — do not terminate user recording session
         if (process.env.NODE_ENV === 'development') {
-          console.info('[Speech Recognition] No speech detected in segment; continuing session.');
+          console.info('[Speech Recognition] No speech detected in segment; continuing active session.');
         }
       } else if (err === 'aborted') {
-        // Engine was aborted, will be handled by onend
+        // Engine was aborted internally, handled by onend if shouldBeListeningRef is true
       } else {
         setError(`Speech recognition notice: ${err}`);
       }
@@ -148,28 +160,41 @@ export const useSpeechRecognition = (): UseSpeechRecognitionReturn => {
 
     recognition.onend = () => {
       setInterimTranscript('');
+      lastProcessedFinalIndexRef.current = -1;
 
       // CRITICAL RECOVERY: If the user is still actively recording, restart recognition
       if (shouldBeListeningRef.current) {
-        if (restartAttemptsRef.current < 25) {
+        if (restartAttemptsRef.current < 30) {
           restartAttemptsRef.current += 1;
           analytics.track('speech_recognition_restarted', {
             attempt: restartAttemptsRef.current,
           });
 
           restartTimerRef.current = window.setTimeout(() => {
-            if (shouldBeListeningRef.current && recognitionRef.current) {
+            if (shouldBeListeningRef.current) {
               try {
-                recognitionRef.current.start();
+                // Re-instantiate clean instance if needed or start existing
+                if (!recognitionRef.current) {
+                  recognitionRef.current = initializeRecognition();
+                }
+                lastProcessedFinalIndexRef.current = -1;
+                recognitionRef.current?.start();
                 setIsListening(true);
               } catch (startErr) {
-                // If start fails because already running or state collision, retry once
                 if (process.env.NODE_ENV === 'development') {
                   console.warn('[Speech Recognition Restart Collision]', startErr);
                 }
+                // Try fresh instance on collision
+                try {
+                  recognitionRef.current = initializeRecognition();
+                  recognitionRef.current?.start();
+                  setIsListening(true);
+                } catch {
+                  // Wait for next scheduled cycle
+                }
               }
             }
-          }, 150);
+          }, 120);
         } else {
           shouldBeListeningRef.current = false;
           setIsListening(false);
@@ -200,6 +225,14 @@ export const useSpeechRecognition = (): UseSpeechRecognitionReturn => {
       }
       if (mediaStreamRef.current) {
         mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+        mediaStreamRef.current = null;
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch {
+          // ignore
+        }
       }
     };
   }, [isSupported, initializeRecognition]);
@@ -207,6 +240,9 @@ export const useSpeechRecognition = (): UseSpeechRecognitionReturn => {
   const startListening = useCallback(() => {
     setError(null);
     accumulatedTranscriptRef.current = '';
+    lastProcessedFinalIndexRef.current = -1;
+    audioChunksRef.current = [];
+    recordedAudioBlobRef.current = null;
     setTranscript('');
     setInterimTranscript('');
     shouldBeListeningRef.current = true;
@@ -215,34 +251,59 @@ export const useSpeechRecognition = (): UseSpeechRecognitionReturn => {
     // 1. Start Web Speech recognition
     if (recognitionRef.current) {
       try {
+        lastProcessedFinalIndexRef.current = -1;
         recognitionRef.current.start();
         setIsListening(true);
       } catch (err) {
         if (process.env.NODE_ENV === 'development') {
           console.warn('[Speech Start Warning]', err);
         }
-        // If recognition was in a lingering state, recreate and start
         recognitionRef.current = initializeRecognition();
         try {
+          lastProcessedFinalIndexRef.current = -1;
           recognitionRef.current?.start();
           setIsListening(true);
-        } catch (retryErr) {
+        } catch {
           setError('Could not start microphone speech recognition.');
         }
       }
     }
 
-    // 2. Optional MediaRecorder alongside Web Speech for audio evidence
+    // 2. Request microphone stream ONCE and feed into MediaRecorder
     if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
+      // Clean up previous stream if any
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+        mediaStreamRef.current = null;
+      }
+
       navigator.mediaDevices
         .getUserMedia({ audio: true })
         .then((stream) => {
           mediaStreamRef.current = stream;
           if (typeof MediaRecorder !== 'undefined') {
             try {
-              const recorder = new MediaRecorder(stream);
+              const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+                ? 'audio/webm;codecs=opus'
+                : 'audio/webm';
+              const recorder = new MediaRecorder(stream, { mimeType });
               mediaRecorderRef.current = recorder;
-              recorder.start();
+
+              recorder.ondataavailable = (e) => {
+                if (e.data && e.data.size > 0) {
+                  audioChunksRef.current.push(e.data);
+                }
+              };
+
+              recorder.onstop = () => {
+                if (audioChunksRef.current.length > 0) {
+                  recordedAudioBlobRef.current = new Blob(audioChunksRef.current, {
+                    type: mimeType,
+                  });
+                }
+              };
+
+              recorder.start(1000); // 1-second chunks
             } catch (recErr) {
               if (process.env.NODE_ENV === 'development') {
                 console.info('[MediaRecorder Optional Info]', recErr);
@@ -295,9 +356,16 @@ export const useSpeechRecognition = (): UseSpeechRecognitionReturn => {
 
   const resetTranscript = useCallback(() => {
     accumulatedTranscriptRef.current = '';
+    lastProcessedFinalIndexRef.current = -1;
+    audioChunksRef.current = [];
+    recordedAudioBlobRef.current = null;
     setTranscript('');
     setInterimTranscript('');
     setError(null);
+  }, []);
+
+  const getAudioBlob = useCallback(() => {
+    return recordedAudioBlobRef.current;
   }, []);
 
   return {
@@ -309,6 +377,7 @@ export const useSpeechRecognition = (): UseSpeechRecognitionReturn => {
     resetTranscript,
     isSupported,
     error,
+    getAudioBlob,
   };
 };
 

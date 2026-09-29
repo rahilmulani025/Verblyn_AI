@@ -15,13 +15,12 @@ export const homeApi = {
   async getLearningHomeData(): Promise<HomeLearningPayload> {
     const today = new Date().toISOString().split('T')[0];
 
-    // 1. Fetch Auth User, Profile, Mission, Progress, and Catalog concurrently
-    const [authData, profile, missionData, progressData, fullCatalog] = await Promise.all([
+    // 1. Fetch Auth User, Profile, Mission, and Progress concurrently
+    const [authData, profile, missionData, progressData] = await Promise.all([
       supabase.auth.getUser(),
       profileApi.getProfile(),
       challengeApi.getDailyMission(),
       progressApi.getProgress(),
-      challengeApi.getChallenges(),
     ]);
 
     const user = authData.data.user;
@@ -105,47 +104,15 @@ export const homeApi = {
     const activeWeakness = progressData.activeWeaknesses?.[0];
     const missionId = missionData?.challenge.id;
 
-    const forYouDrills: Challenge[] = [];
-    const remainingCatalog = fullCatalog.filter((c) => c.id !== missionId);
-
-    // Pick 1: Aligned with weakness / lowest skill
-    if (activeWeakness) {
-      const weaknessMatch = remainingCatalog.find(
-        (c) =>
-          c.targetWeakness?.toLowerCase() === activeWeakness.type.toLowerCase() ||
-          c.targetSkill.toLowerCase() === activeWeakness.skillName.toLowerCase()
-      );
-      if (weaknessMatch) forYouDrills.push(weaknessMatch);
-    } else {
-      const skillMatch = remainingCatalog.find(
-        (c) => c.targetSkill.toLowerCase() === focusSkill.toLowerCase()
-      );
-      if (skillMatch) forYouDrills.push(skillMatch);
-    }
-
-    // Pick 2: Goal alignment
-    if (profile?.primaryGoal) {
-      const goalMatch = remainingCatalog.find(
-        (c) => c.goalTags.includes(profile.primaryGoal!) && !forYouDrills.some((d) => d.id === c.id)
-      );
-      if (goalMatch) forYouDrills.push(goalMatch);
-    }
-
-    // Pick 3: Variety in another skill
-    const varietyMatch = remainingCatalog.find(
-      (c) => !forYouDrills.some((d) => d.id === c.id) && c.targetSkill !== focusSkill
-    );
-    if (varietyMatch) forYouDrills.push(varietyMatch);
-
-    // Fallback if needed to ensure 3 drills
-    while (forYouDrills.length < 3 && remainingCatalog.length > forYouDrills.length) {
-      const nextCandidate = remainingCatalog.find((c) => !forYouDrills.some((d) => d.id === c.id));
-      if (nextCandidate) forYouDrills.push(nextCandidate);
-      else break;
-    }
+    const forYouDrills = await challengeApi.getRecommendedChallenges(3, {
+      excludeId: missionId,
+      focusSkill,
+      primaryGoal: profile?.primaryGoal || undefined,
+      targetWeakness: activeWeakness?.type,
+    });
 
     // Next recommended challenge for completed mission state
-    const nextRecommendedDrill = forYouDrills[0] || remainingCatalog[0];
+    const nextRecommendedDrill = forYouDrills[0] || missionData?.challenge;
 
     const hour = now.getHours();
     const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
