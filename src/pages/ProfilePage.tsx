@@ -13,12 +13,15 @@ import { GOAL_PRESETS } from '@/features/home/goals.api';
 import { UserProfile, UserProfession } from '@/features/profile/profile.types';
 import { invalidateProfileCache } from '@/app/guards/useProfileState';
 import { useToast } from '@/hooks/use-toast';
-import { User, LogOut, Save, Target, Flame, Award, Clock } from 'lucide-react';
+import { useGeminiKey } from '@/context/GeminiKeyContext';
+import { GeminiKeyModal } from '@/components/settings/GeminiKeyModal';
+import { User, LogOut, Save, Target, Flame, Award, Clock, Bot, KeyRound } from 'lucide-react';
 
 const COMMITMENT_OPTIONS = [5, 10, 15, 20];
 
 export const ProfilePage: React.FC = () => {
   const { user, signOut } = useAuth();
+  const { hasGeminiKey } = useGeminiKey();
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -34,6 +37,7 @@ export const ProfilePage: React.FC = () => {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [keyModalOpen, setKeyModalOpen] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -236,6 +240,34 @@ export const ProfilePage: React.FC = () => {
           </div>
         </div>
 
+        {/* AI COACH SETTINGS (BYOK) */}
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+            <Bot className="w-4 h-4 text-primary" /> AI Coach Settings (BYOK)
+          </h3>
+          <Card className="border border-primary/30 bg-primary/5">
+            <CardContent className="p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-foreground">Google Gemini Key</h4>
+                  <p className="text-[11px] text-muted-foreground">
+                    {hasGeminiKey ? 'API Key Active (Memory Session)' : 'Not Connected'}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setKeyModalOpen(true)}
+                  className="text-xs font-semibold gap-1.5 border-primary/30 text-primary"
+                >
+                  <KeyRound className="w-3.5 h-3.5" />
+                  {hasGeminiKey ? 'Manage Key' : 'Connect Key'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
         {/* Primary Save Action */}
         <Button
           onClick={handleSave}
@@ -245,6 +277,8 @@ export const ProfilePage: React.FC = () => {
           {saving ? 'Saving...' : 'Save Profile Changes'}
           <Save className="w-4 h-4" />
         </Button>
+
+        <GeminiKeyModal open={keyModalOpen} onOpenChange={setKeyModalOpen} />
 
         {/* Sign Out Button */}
         <div className="pt-4 border-t border-border/40">

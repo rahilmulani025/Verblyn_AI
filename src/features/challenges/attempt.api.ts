@@ -32,6 +32,7 @@ export interface SubmitAttemptInput {
   durationSeconds: number;
   metrics: SpeechMetricsSummary;
   isDailyMission?: boolean;
+  aiAnalysis?: import('@/services/gemini/gemini.types').AIAnalysisResult;
 }
 
 export const attemptApi = {
@@ -225,6 +226,102 @@ export const attemptApi = {
         word_count: input.metrics.wordCount,
         words_per_minute: input.metrics.wpm,
       });
+
+      // A. If direct Gemini BYOK aiAnalysis was provided by the frontend speaking engine
+      if (input.aiAnalysis) {
+        const ai = input.aiAnalysis;
+        const scores: ChallengeScoreBreakdown = {
+          overallScore: ai.overall_score || 78,
+          fluency: ai.skills?.fluency || 75,
+          clarity: ai.skills?.clarity || 75,
+          vocabulary: ai.skills?.vocabulary || 75,
+          grammar: ai.skills?.grammar || 75,
+          confidence: ai.skills?.confidence || 75,
+        };
+
+        const rawStrengths = (ai.strengths || []).map((s) => ({
+          title: s.title,
+          detail: s.evidence ? `${s.evidence} — ${s.impact}` : s.impact || s.title,
+        }));
+
+        const rawImprovements = (ai.improvements || []).map((imp) => ({
+          title: imp.issue_type.replace(/_/g, ' ').toUpperCase(),
+          detail: imp.explanation ? `${imp.evidence}: ${imp.explanation}` : imp.explanation || imp.evidence,
+          action: imp.action,
+        }));
+
+        const weaknessCandidates: WeaknessCandidate[] = (ai.improvements || [])
+          .filter((imp) => imp.severity === 'high' || imp.severity === 'medium')
+          .map((imp) => ({
+            type: imp.issue_type,
+            skill: input.challenge.targetSkill,
+            confidence: imp.severity === 'high' ? 0.9 : 0.75,
+            evidence: imp.evidence || imp.explanation,
+          }));
+
+        const whatYouDidWell = rawStrengths.map((s) => s.detail).filter(Boolean);
+        const improveNext = rawImprovements.map((imp) => imp.action || imp.detail).filter(Boolean);
+
+        try {
+          const { data: rpcRes } = await supabase.rpc(
+            'persist_attempt_analysis_and_progression',
+            {
+              p_attempt_id: attemptId,
+              p_scores: scores as unknown as Json,
+              p_metrics: input.metrics as unknown as Json,
+              p_strengths: rawStrengths as unknown as Json,
+              p_improvements: rawImprovements as unknown as Json,
+              p_weakness_candidates: weaknessCandidates as unknown as Json,
+              p_coach_message: ai.coach_summary || `Evaluated by Gemini AI Coach.`,
+              p_recommended_focus: ai.next_focus || input.challenge.targetSkill,
+              p_analysis_version: 'gemini-2.5-flash-byok',
+              p_is_daily_mission: Boolean(input.isDailyMission),
+              p_is_weakness: isWeaknessTarget,
+              p_is_personal_best: isPersonalBest,
+            }
+          );
+
+          const prog = rpcRes as unknown as RpcCompletionResult;
+          const recommendation = challengeApi.getRecommendedNextChallenge(
+            input.challenge.id,
+            scores,
+            profile?.primaryGoal || undefined,
+            weaknessCandidates[0]
+          );
+
+          return {
+            id: attemptId,
+            challengeId: input.challenge.id,
+            userId,
+            status: 'COMPLETED',
+            startedAt: new Date(Date.now() - input.durationSeconds * 1000).toISOString(),
+            completedAt: new Date().toISOString(),
+            durationSeconds: input.durationSeconds,
+            transcript: input.transcript,
+            metrics: input.metrics,
+            scores,
+            whatYouDidWell: whatYouDidWell.length > 0 ? whatYouDidWell : evaluation.whatYouDidWell,
+            improveNext: improveNext.length > 0 ? improveNext : evaluation.improveNext,
+            coachingStrengths: rawStrengths,
+            coachingImprovements: rawImprovements,
+            coachMessage: ai.coach_summary,
+            recommendedFocus: ai.next_focus,
+            weaknessCandidates,
+            analysisVersion: 'gemini-2.5-flash-byok',
+            xpEarned: prog?.earned_xp || {
+              base: input.challenge.xpReward || 30,
+              dailyBonus: input.isDailyMission ? 20 : 0,
+              weaknessBonus: isWeaknessTarget ? 10 : 0,
+              personalBestBonus: isPersonalBest ? 15 : 0,
+              total: (input.challenge.xpReward || 30) + (input.isDailyMission ? 20 : 0) + (isPersonalBest ? 15 : 0),
+            },
+            recommendation,
+            isDailyMission: input.isDailyMission,
+          };
+        } catch (rpcErr) {
+          console.warn('Direct AI analysis RPC persistence notice:', rpcErr);
+        }
+      }
 
       // B. Invoke Supabase Edge Function: analyze-attempt
       try {

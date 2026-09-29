@@ -237,6 +237,43 @@ export const ChallengeResultPage: React.FC = () => {
             </div>
           </div>
 
+          {/* MEASURED SPEECH METRICS (DETERMINISTIC) */}
+          {attempt?.metrics && (
+            <div className="space-y-2">
+              <span className="text-xs font-bold text-foreground uppercase tracking-wider flex items-center gap-1.5">
+                <Target className="w-3.5 h-3.5 text-primary" /> Measured Speech Metrics
+              </span>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div className="p-2.5 rounded-xl bg-secondary/40 border border-border/60 text-center">
+                  <span className="text-[10px] text-muted-foreground font-medium">Pacing</span>
+                  <p className="text-sm font-bold text-foreground mt-0.5">{attempt.metrics.wpm} WPM</p>
+                </div>
+                <div className="p-2.5 rounded-xl bg-secondary/40 border border-border/60 text-center">
+                  <span className="text-[10px] text-muted-foreground font-medium">Fillers</span>
+                  <p className="text-sm font-bold text-foreground mt-0.5">{attempt.metrics.fillerStats?.total || 0}</p>
+                </div>
+                <div className="p-2.5 rounded-xl bg-secondary/40 border border-border/60 text-center">
+                  <span className="text-[10px] text-muted-foreground font-medium">Duration</span>
+                  <p className="text-sm font-bold text-foreground mt-0.5">{attempt.durationSeconds}s</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="p-2.5 rounded-xl bg-secondary/40 border border-border/60 flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">Repetitions</span>
+                  <span className="text-xs font-bold text-foreground">{attempt.metrics.repetitionStats?.total || 0}</span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-secondary/40 border border-border/60 flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">Lexical Diversity</span>
+                  <span className="text-xs font-bold text-foreground">
+                    {Math.round((attempt.metrics.vocabularyDiversity || 0) * 100)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* WHAT YOU DID WELL */}
           <Card className="border border-emerald-500/30 bg-emerald-500/5">
             <CardContent className="p-3.5 space-y-2">
@@ -268,16 +305,16 @@ export const ChallengeResultPage: React.FC = () => {
             <CardContent className="p-3.5 space-y-2">
               <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400 uppercase tracking-wider">
                 <Target className="w-4 h-4" />
-                <span>Improve Next</span>
+                <span>What Held You Back & Actionable Fixes</span>
               </div>
               {coachingImprovements.length > 0 ? (
                 <div className="space-y-2.5">
                   {coachingImprovements.map((item, idx) => (
-                    <div key={idx} className="space-y-1 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                    <div key={idx} className="space-y-1 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
                       <p className="text-xs font-bold text-amber-300">{item.title}</p>
                       <p className="text-xs text-muted-foreground leading-relaxed">{item.detail}</p>
                       {item.action && (
-                        <div className="flex items-start gap-1.5 text-[11px] text-amber-200 font-medium pt-1">
+                        <div className="flex items-start gap-1.5 text-[11px] text-amber-200 font-semibold pt-1 border-t border-amber-500/20">
                           <Lightbulb className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
                           <span>Action: {item.action}</span>
                         </div>
@@ -294,6 +331,20 @@ export const ChallengeResultPage: React.FC = () => {
               )}
             </CardContent>
           </Card>
+
+          {/* AUTHORITATIVE FINAL TRANSCRIPT */}
+          {attempt?.transcript && (
+            <Card className="border border-border/70 bg-card/60">
+              <CardContent className="p-3.5 space-y-1.5">
+                <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                  Final Evaluated Transcript
+                </span>
+                <p className="text-xs text-foreground/90 font-mono italic leading-relaxed">
+                  "{attempt.transcript}"
+                </p>
+              </CardContent>
+            </Card>
+          )}
 
           {/* IDENTIFIED WEAKNESS (IF DETECTED) */}
           {weaknessCandidate && (

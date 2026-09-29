@@ -25,15 +25,34 @@ import {
   Zap,
 } from 'lucide-react';
 
+import { useGeminiKey } from '@/context/GeminiKeyContext';
+import { geminiApi } from '@/services/gemini/gemini.api';
+import { AIAnalysisResult } from '@/services/gemini/gemini.types';
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const dataUrl = reader.result as string;
+      const base64 = dataUrl.split(',')[1] || '';
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 export const ChallengeDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const { geminiApiKey } = useGeminiKey();
 
   const isDailyMission = Boolean((location.state as { isDailyMission?: boolean })?.isDailyMission);
+  const personalizedChallenge = (location.state as { personalizedChallenge?: Challenge })?.personalizedChallenge;
 
-  const [challenge, setChallenge] = useState<Challenge | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [challenge, setChallenge] = useState<Challenge | null>(personalizedChallenge || null);
+  const [loading, setLoading] = useState(!personalizedChallenge);
   const [status, setStatus] = useState<AttemptStatus>('STARTED');
   const [countdown, setCountdown] = useState<number>(3);
   const [seconds, setSeconds] = useState<number>(0);
@@ -52,10 +71,17 @@ export const ChallengeDetailPage: React.FC = () => {
     resetTranscript,
     isSupported,
     error: speechError,
+    getAudioBlob,
   } = useSpeechRecognition();
 
-  // Load challenge metadata
+  // Load challenge metadata if not passed from state
   useEffect(() => {
+    if (personalizedChallenge) {
+      setChallenge(personalizedChallenge);
+      setLoading(false);
+      return;
+    }
+
     if (!id) return;
     challengeApi.getChallengeById(id).then((data) => {
       setChallenge(data);
@@ -75,7 +101,7 @@ export const ChallengeDetailPage: React.FC = () => {
         analytics.track('challenge_abandoned', { challenge_id: id });
       }
     };
-  }, [id, isDailyMission, status]);
+  }, [id, isDailyMission, status, personalizedChallenge]);
 
   // Handle speech recognition error
   useEffect(() => {
@@ -176,9 +202,51 @@ export const ChallengeDetailPage: React.FC = () => {
     try {
       const finalTranscript =
         rawTranscript ||
-        `Delivered structured drill for ${challenge.title} addressing key prompt objectives concisely.`;
+        `Delivered structured response addressing the prompt: "${challenge.prompt}".`;
       const elapsed = Math.max(seconds, 5);
       const metrics = calculateSpeechMetrics(finalTranscript, elapsed);
+
+      let aiAnalysis: AIAnalysisResult | undefined;
+
+      // Real Gemini Evaluation if key is connected
+      if (geminiApiKey) {
+        try {
+          const audioBlob = getAudioBlob?.();
+          let audioBase64: string | undefined;
+
+          if (audioBlob && audioBlob.size > 0 && audioBlob.size <= 15 * 1024 * 1024) {
+            audioBase64 = await blobToBase64(audioBlob);
+          }
+
+          aiAnalysis = await geminiApi.analyzeAttempt(geminiApiKey, {
+            challenge_title: challenge.title,
+            challenge_prompt: challenge.prompt,
+            target_skill: challenge.targetSkill,
+            target_weakness: challenge.targetWeakness,
+            time_limit_seconds: challenge.durationSeconds,
+            success_criteria: challenge.instructions,
+            user_goal: 'Professional Speaking',
+            transcript: finalTranscript,
+            audio_base64: audioBase64,
+            audio_mime_type: audioBlob?.type || 'audio/webm',
+            deterministic_metrics: {
+              durationSeconds: elapsed,
+              wordCount: metrics.wordCount,
+              wordsPerMinute: metrics.wpm,
+              fillerCount: metrics.fillerStats.total,
+              repetitionCount: metrics.repetitionStats.total,
+              sentenceCount: Math.max(1, finalTranscript.split(/[.!?]+/).filter(Boolean).length),
+              averageSentenceLength: metrics.averageSentenceLength,
+              vocabularyDiversity: metrics.vocabularyDiversity,
+              isComplete: true,
+            },
+          });
+        } catch (geminiErr) {
+          if (process.env.NODE_ENV === 'development') {
+            console.warn('Gemini evaluation notice (falling back to server analysis):', geminiErr);
+          }
+        }
+      }
 
       const attemptResult = await attemptApi.submitChallengeAttempt({
         challenge,
@@ -186,6 +254,7 @@ export const ChallengeDetailPage: React.FC = () => {
         durationSeconds: elapsed,
         metrics,
         isDailyMission,
+        aiAnalysis,
       });
 
       if (attemptResult) {
