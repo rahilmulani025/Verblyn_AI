@@ -1,0 +1,60 @@
+/**
+ * Verblyn Mobile Design System Tokens
+ * Calm, focused, high-contrast mobile product hierarchy.
+ */
+
+:root {
+  /* Mobile Safe Area & Layout Tokens */
+  --mobile-header-height: 56px;
+  --mobile-nav-height: 64px;
+  --mobile-max-width: 480px;
+  
+  /* Tap target minimum */
+  --min-tap-target: 44px;
+
+  /* Surfaces & Hierarchy */
+  --surface-base: hsl(224, 25%, 8%);
+  --surface-subtle: hsl(224, 22%, 11%);
+  --surface-card: hsl(224, 20%, 14%);
+  --surface-elevated: hsl(224, 18%, 18%);
+  --surface-pressed: hsl(224, 18%, 16%);
+
+  /* Borders */
+  --border-subtle: hsl(224, 15%, 20%);
+  --border-strong: hsl(224, 15%, 28%);
+
+  /* Accent & Action */
+  --action-primary: hsl(226, 85%, 60%);
+  --action-primary-hover: hsl(226, 85%, 54%);
+  --action-primary-foreground: hsl(0, 0%, 100%);
+  
+  --accent-spark: hsl(175, 80%, 45%);
+  --accent-streak: hsl(28, 95%, 55%);
+  --accent-xp: hsl(45, 95%, 50%);
+}
+
+/* Mobile-first utility helpers */
+.touch-target {
+  min-height: var(--min-tap-target);
+  min-width: var(--min-tap-target);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Safe area padding utilities */
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.mobile-shell-container {
+  width: 100%;
+  max-width: var(--mobile-max-width);
+  margin-left: auto;
+  margin-right: auto;
+  min-height: 100dvh;
+}
