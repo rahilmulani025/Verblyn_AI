@@ -16,6 +16,5 @@ export const AI_CONFIG = {
   MAX_AUDIO_DURATION_SECONDS: 180,
   MIN_AUDIO_DURATION_SECONDS: 3,
   MAX_INLINE_AUDIO_BYTES: 15 * 1024 * 1024, // 15MB safe inline limit
-  DEFAULT_TEMPERATURE: 0.2, // Low temperature for consistent, strict, objective evaluation
-  TOPIC_TEMPERATURE: 0.7, // Slightly higher for diverse, tailored speaking scenarios
 } as const;
+

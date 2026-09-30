@@ -257,7 +257,6 @@ Generate one distinct, personalized speaking drill for this user.`;
           systemInstruction: { parts: [{ text: systemInstruction }] },
           contents: [{ parts: [{ text: userContent }] }],
           generationConfig: {
-            temperature: 0.7,
             responseMimeType: "application/json",
           },
         }),
@@ -386,7 +385,6 @@ Evaluate the attempt rigorously according to the instructions.`;
           systemInstruction: { parts: [{ text: systemInstruction }] },
           contents: [{ parts }],
           generationConfig: {
-            temperature: 0.2,
             responseMimeType: "application/json",
           },
         }),
