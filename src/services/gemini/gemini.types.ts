@@ -38,6 +38,10 @@ export interface PersonalizedChallenge {
   time_limit_seconds: number; // 30-180
   success_criteria: string[];
   why_this_challenge: string;
+  category?: string;
+  practice_context?: string;
+  training_objective?: string;
+  why_this_question?: string;
   follow_up_question?: string;
   coach_tip_before_start: string;
 }
@@ -122,7 +126,11 @@ export interface GenerateTopicPayload {
   weakest_skill?: string;
   current_level?: number;
   template_type?: string;
+  practice_context?: string;
+  question_category?: string;
+  training_objective?: string;
   recent_prompts?: string[];
+  recent_categories?: string[];
 }
 
 export interface AnalyzeAttemptPayload {
