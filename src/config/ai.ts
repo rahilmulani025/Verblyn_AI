@@ -5,11 +5,11 @@
 
 export const GEMINI_MODELS = {
   // Primary coach model for structured reasoning, evaluation, and topic generation
-  COACH: 'gemini-1.5-flash',
+  COACH: 'gemini-3.8-flash',
   // Audio transcription & understanding model
-  TRANSCRIBE: 'gemini-1.5-flash',
+  TRANSCRIBE: 'gemini-3.8-flash',
   // Fallback / fast response model
-  FAST: 'gemini-1.5-flash',
+  FAST: 'gemini-3.8-flash',
 } as const;
 
 export const AI_CONFIG = {
