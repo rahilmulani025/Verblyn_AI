@@ -4,6 +4,9 @@
  * CORE PRINCIPLE:
  * VERBLYN decides WHAT the user should practice (Context, Category, Target Skill, Weakness, Difficulty, Objective).
  * GEMINI decides HOW to naturally phrase the exercise.
+ * 
+ * CONTEXT-AWARE MAPPING:
+ * GOAL -> CONTEXT -> TARGET ROLE -> WEAKNESS -> CATEGORY -> TRAINING OBJECTIVE
  */
 
 import { TargetSkill } from '@/features/challenges/challenge.types';
@@ -66,7 +69,7 @@ const EVERYDAY_CATEGORIES: EverydayCategory[] = [
 
 export const trainingPolicy = {
   /**
-   * Resolves practice context from explicit goal or defaults to everyday.
+   * Resolves practice context from explicit goal or defaults to interview.
    */
   resolvePracticeContext(goal?: string): PracticeContext {
     if (!goal) return 'interview';
@@ -74,8 +77,9 @@ export const trainingPolicy = {
   },
 
   /**
-   * Selects the next appropriate question category in the controlled taxonomy,
-   * rotating away from recently completed categories.
+   * Context-aware category selection:
+   * Maps (Context, Weakness, TargetRole) to targeted category pools,
+   * rotating away from recently completed categories to ensure variety.
    */
   selectCategory(
     context: PracticeContext,
@@ -86,11 +90,14 @@ export const trainingPolicy = {
 
     switch (context) {
       case 'interview':
-        // If weakness is structure, prefer project deep dive or behavioral
         if (targetWeakness === 'unclear_structure' || targetWeakness === 'overlong_answers') {
           pool = ['project_deep_dive', 'behavioral', 'situational', 'technical_explanation'];
         } else if (targetWeakness === 'weak_opening' || targetWeakness === 'weak_conclusion') {
           pool = ['hr', 'resume', 'role_specific'];
+        } else if (targetWeakness === 'insufficient_detail' || targetWeakness === 'vague_explanation') {
+          pool = ['project_deep_dive', 'technical_explanation', 'follow_up'];
+        } else if (targetWeakness === 'filler_dependency' || targetWeakness === 'slow_delivery' || targetWeakness === 'rushed_delivery') {
+          pool = ['behavioral', 'role_specific', 'situational'];
         } else {
           pool = INTERVIEW_CATEGORIES;
         }
@@ -98,15 +105,23 @@ export const trainingPolicy = {
 
       case 'workplace':
         if (targetWeakness === 'unclear_structure' || targetWeakness === 'overlong_answers') {
-          pool = ['status_update', 'presentation', 'meeting'];
+          pool = ['status_update', 'explanation', 'meeting', 'presentation'];
+        } else if (targetWeakness === 'weak_opening' || targetWeakness === 'weak_conclusion') {
+          pool = ['presentation', 'client_communication', 'feedback'];
+        } else if (targetWeakness === 'filler_dependency' || targetWeakness === 'rushed_delivery') {
+          pool = ['status_update', 'client_communication', 'disagreement'];
         } else {
           pool = WORKPLACE_CATEGORIES;
         }
         break;
 
       case 'public_speaking':
-        if (targetWeakness === 'filler_dependency' || targetWeakness === 'rushed_delivery') {
+        if (targetWeakness === 'unclear_structure' || targetWeakness === 'overlong_answers') {
           pool = ['persuasive', 'presentation', 'storytelling'];
+        } else if (targetWeakness === 'weak_opening' || targetWeakness === 'weak_conclusion') {
+          pool = ['impromptu', 'persuasive', 'storytelling'];
+        } else if (targetWeakness === 'filler_dependency' || targetWeakness === 'rushed_delivery') {
+          pool = ['persuasive', 'presentation', 'impromptu'];
         } else {
           pool = PUBLIC_SPEAKING_CATEGORIES;
         }
@@ -114,11 +129,17 @@ export const trainingPolicy = {
 
       case 'everyday':
       default:
-        pool = EVERYDAY_CATEGORIES;
+        if (targetWeakness === 'unclear_structure' || targetWeakness === 'overlong_answers') {
+          pool = ['storytelling', 'explanation', 'opinion'];
+        } else if (targetWeakness === 'filler_dependency') {
+          pool = ['conversation', 'experience', 'opinion'];
+        } else {
+          pool = EVERYDAY_CATEGORIES;
+        }
         break;
     }
 
-    // Filter out categories used in the last 2 attempts to ensure variety
+    // Anti-repetition: Filter out categories used in the last 2 attempts
     const recentSet = new Set(recentCategories.slice(0, 2).map((c) => c.toLowerCase()));
     const available = pool.filter((cat) => !recentSet.has(cat.toLowerCase()));
 
@@ -126,16 +147,80 @@ export const trainingPolicy = {
   },
 
   /**
-   * Evaluates the user state and produces a deterministic training plan.
+   * Generates a deterministic training objective given the complete context.
+   */
+  synthesizeTrainingObjective(
+    context: PracticeContext,
+    targetRole: string,
+    category: QuestionCategory,
+    targetWeakness?: string
+  ): { trainingObjective: string; whyThisQuestion: string } {
+    const weaknessLabel = targetWeakness ? targetWeakness.replace(/_/g, ' ') : 'conversational delivery';
+
+    let trainingObjective = `Practice concise, structured communication for ${targetRole}.`;
+    let whyThisQuestion = `Designed to strengthen your professional speaking stamina and clarity.`;
+
+    if (context === 'interview') {
+      if (category === 'project_deep_dive') {
+        trainingObjective = `Explain a technical or project achievement with structured problem-action-result (STAR) framing to overcome ${weaknessLabel}.`;
+        whyThisQuestion = `Interviewers evaluate your ability to articulate technical contributions crisply without rambling. This drill targets ${weaknessLabel}.`;
+      } else if (category === 'behavioral') {
+        trainingObjective = `Demonstrate leadership or conflict resolution under pressure without hesitation or filler pauses.`;
+        whyThisQuestion = `Behavioral questions test how you structure stories of past actions to demonstrate leadership for ${targetRole}.`;
+      } else if (category === 'technical_explanation') {
+        trainingObjective = `Break down a complex technical concept simply and accurately for an interviewer.`;
+        whyThisQuestion = `Assesses clarity and precision when communicating domain concepts to non-technical stakeholders.`;
+      } else if (category === 'hr' || category === 'resume') {
+        trainingObjective = `Deliver a high-impact, crisp career summary or self-introduction without generic filler.`;
+        whyThisQuestion = `First impressions set the tone for the entire interview. This drill ensures strong opening clarity.`;
+      } else {
+        trainingObjective = `Deliver a crisp, authoritative interview response tailored to ${targetRole}.`;
+        whyThisQuestion = `Tailored for ${targetRole} interview preparation to build conversational reflexes.`;
+      }
+    } else if (context === 'workplace') {
+      if (category === 'status_update') {
+        trainingObjective = `Deliver an executive project update highlighting progress, blockers, and next steps in under 60 seconds.`;
+        whyThisQuestion = `Execs and team leads look for concise, structured status briefings without unneeded details.`;
+      } else if (category === 'client_communication') {
+        trainingObjective = `Explain a recommendation or update with diplomatic authority and high clarity.`;
+        whyThisQuestion = `Builds credibility and prevents miscommunication with external clients and partners.`;
+      } else if (category === 'disagreement' || category === 'feedback') {
+        trainingObjective = `Express a constructive dissenting opinion or feedback with professional composure.`;
+        whyThisQuestion = `Crucial for cross-functional collaboration and leadership communication.`;
+      } else {
+        trainingObjective = `Communicate workplace reasoning clearly and persuasively for ${targetRole}.`;
+        whyThisQuestion = `Strengthens everyday workplace alignment and meeting participation.`;
+      }
+    } else if (context === 'public_speaking') {
+      if (category === 'persuasive') {
+        trainingObjective = `Hook listener attention and deliver a compelling persuasive argument with steady pacing.`;
+        whyThisQuestion = `Persuasive speaking demands steady cadence and crisp framing to convince an audience.`;
+      } else if (category === 'impromptu') {
+        trainingObjective = `Organize spontaneous thoughts rapidly using point-reason-example framing.`;
+        whyThisQuestion = `Builds mental agility so you never freeze when called on spontaneously.`;
+      } else {
+        trainingObjective = `Deliver an engaging story with clear narrative tension and strong conclusion.`;
+        whyThisQuestion = `Storytelling hooks human attention and makes communication memorable.`;
+      }
+    } else {
+      trainingObjective = `Express a spontaneous, natural viewpoint with fluid conversational cadence.`;
+      whyThisQuestion = `Deliberate practice to build everyday social fluency and confidence.`;
+    }
+
+    return { trainingObjective, whyThisQuestion };
+  },
+
+  /**
+   * Evaluates user personalization state and produces an authoritative TrainingPlan.
    */
   generateTrainingPlan(state: UserPersonalizationState): TrainingPlan {
     // 1. Resolve Practice Context
     const practiceContext = this.resolvePracticeContext(state.primaryGoal);
 
-    // 2. Identify Target Role & Domain
+    // 2. Identify Target Role & Domain (fallback cleanly if unspecified)
     const targetRole =
       state.targetRole ||
-      (state.profession === 'student' ? 'Fresher / Entry-Level Candidate' : state.profession || 'Working Professional');
+      (state.profession === 'student' ? 'Campus Placement Candidate' : state.profession || 'Working Professional');
 
     // 3. Identify Primary Weakness & Target Skill
     const activeWeakness = state.activeWeaknesses[0];
@@ -175,7 +260,7 @@ export const trainingPolicy = {
       difficultyLabel = 'Intermediate';
     }
 
-    // 5. Select Question Category from Controlled Taxonomy with anti-repetition rotation
+    // 5. Select Question Category using Context-Aware Mapping + Anti-Repetition
     const recentCategories = state.recentAttempts
       .map((a) => a.category || '')
       .filter(Boolean);
@@ -186,31 +271,13 @@ export const trainingPolicy = {
       recentCategories
     );
 
-    // 6. Formulate Deterministic Training Objective
-    const weaknessLabel = targetWeakness ? targetWeakness.replace(/_/g, ' ') : 'conversational flow';
-    let trainingObjective = `Practice concise, structured communication for ${targetRole}.`;
-
-    if (practiceContext === 'interview') {
-      if (questionCategory === 'project_deep_dive') {
-        trainingObjective = `Explain a technical or project achievement with structured problem-action-result (STAR) framing to overcome ${weaknessLabel}.`;
-      } else if (questionCategory === 'behavioral') {
-        trainingObjective = `Demonstrate leadership or conflict resolution under pressure without rambling or filler pauses.`;
-      } else if (questionCategory === 'technical_explanation') {
-        trainingObjective = `Break down a complex technical concept simply and accurately for an interviewer.`;
-      } else {
-        trainingObjective = `Deliver a crisp, authoritative interview response tailored to ${targetRole}.`;
-      }
-    } else if (practiceContext === 'workplace') {
-      if (questionCategory === 'status_update') {
-        trainingObjective = `Deliver an executive project update highlighting progress, blockers, and next steps in under 60 seconds.`;
-      } else {
-        trainingObjective = `Communicate workplace reasoning clearly and persuasively.`;
-      }
-    } else if (practiceContext === 'public_speaking') {
-      trainingObjective = `Hook listener attention and deliver a compelling persuasive argument with steady pacing.`;
-    } else {
-      trainingObjective = `Express a spontaneous, natural viewpoint with fluid conversational cadence.`;
-    }
+    // 6. Synthesize Concrete Objective & Why
+    const { trainingObjective } = this.synthesizeTrainingObjective(
+      practiceContext,
+      targetRole,
+      questionCategory,
+      targetWeakness
+    );
 
     // 7. Time limit based on difficulty & category
     const timeLimitSeconds = questionCategory === 'status_update' ? 45 : difficulty >= 4 ? 90 : 60;

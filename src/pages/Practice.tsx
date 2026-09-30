@@ -7,8 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { challengeApi } from '@/features/challenges/challenge.api';
 import { CHALLENGE_CATALOG } from '@/features/challenges/challenge.catalog';
-import { profileApi } from '@/features/profile/profile.api';
-import { progressApi } from '@/features/progress/progress.api';
+import { personalizationApi } from '@/features/personalization/personalization.api';
+import { TrainingPlan } from '@/features/personalization/personalization.types';
 import { Challenge } from '@/features/challenges/challenge.types';
 import { useGeminiKey } from '@/context/GeminiKeyContext';
 import { geminiApi } from '@/services/gemini/gemini.api';
@@ -29,6 +29,8 @@ import {
   CheckCircle2,
   KeyRound,
   Loader2,
+  Briefcase,
+  Target,
 } from 'lucide-react';
 
 export const Practice: React.FC = () => {
@@ -39,37 +41,48 @@ export const Practice: React.FC = () => {
   const [catalog, setCatalog] = useState<Challenge[]>(CHALLENGE_CATALOG);
   const [currentChallenge, setCurrentChallenge] = useState<Challenge>(CHALLENGE_CATALOG[0]);
   const [aiChallenge, setAiChallenge] = useState<PersonalizedChallenge | null>(null);
+  const [activePlan, setActivePlan] = useState<TrainingPlan | null>(null);
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
   const [showFullLibrary, setShowFullLibrary] = useState(false);
   const [keyModalOpen, setKeyModalOpen] = useState(false);
   const candidateIndexRef = useRef<number>(0);
 
-  // User context refs for AI generation
-  const profileRef = useRef<{ primaryGoal?: string } | null>(null);
-  const progressRef = useRef<{
-    activeWeaknesses?: Array<{ type: string }>;
-    skills?: Array<{ skillName: string; currentScore: number }>;
-  } | null>(null);
-
   const generateAiTopic = useCallback(async (apiKey: string) => {
     setIsGeneratingAi(true);
     try {
-      const activeWeakness = progressRef.current?.activeWeaknesses?.[0]?.type || 'Filler words';
-      const weakestSkill = progressRef.current?.skills
-        ? [...progressRef.current.skills].sort((a, b) => a.currentScore - b.currentScore)[0]?.skillName
-        : 'Fluency';
+      // 1. Get authoritative deterministic training plan from personalization policy
+      const plan = await personalizationApi.getActiveTrainingPlan();
+      setActivePlan(plan);
 
+      // 2. Invoke Gemini topic generator with full training plan contract
       const generated = await geminiApi.generateTopic(apiKey, {
-        primary_goal: profileRef.current?.primaryGoal || 'Professional Communication',
-        target_role: 'Student / Professional',
-        active_weakness: activeWeakness,
-        weakest_skill: weakestSkill,
-        current_level: 1,
-        template_type: 'Explain Simply',
+        practice_context: plan.practiceContext,
+        target_role: plan.targetRole,
+        target_skill: plan.targetSkill,
+        active_weakness: plan.targetWeakness,
+        question_category: plan.questionCategory,
+        difficulty: plan.difficulty,
+        training_objective: plan.trainingObjective,
+        time_limit_seconds: plan.timeLimitSeconds,
+        recent_prompts: plan.avoidRecentPrompts,
+        avoid_prompts: plan.avoidRecentPrompts,
+        recent_categories: plan.avoidRecentCategories,
       });
 
       if (generated && generated.challenge_prompt) {
-        setAiChallenge(generated);
+        // Normalize returned properties against the authoritative plan for machine-readable integrity
+        const normalizedChallenge: PersonalizedChallenge = {
+          ...generated,
+          category: generated.category || plan.questionCategory,
+          practice_context: generated.practice_context || plan.practiceContext,
+          target_skill: generated.target_skill || plan.targetSkill,
+          target_weakness: generated.target_weakness || plan.targetWeakness,
+          difficulty: generated.difficulty || plan.difficulty,
+          time_limit_seconds: generated.time_limit_seconds || plan.timeLimitSeconds,
+          why_this_challenge: generated.why_this_challenge || generated.why_this_question || plan.trainingObjective,
+          why_this_question: generated.why_this_question || generated.why_this_challenge || plan.trainingObjective,
+        };
+        setAiChallenge(normalizedChallenge);
       }
     } catch (err) {
       if (process.env.NODE_ENV === 'development') {
@@ -85,49 +98,38 @@ export const Practice: React.FC = () => {
 
     async function loadPersonalizedRecommendation() {
       try {
-        const [allChallenges, profile, progress] = await Promise.all([
+        const [allChallenges, plan] = await Promise.all([
           challengeApi.getChallenges(),
-          profileApi.getProfile(),
-          progressApi.getProgress(),
+          personalizationApi.getActiveTrainingPlan(),
         ]);
-
-        profileRef.current = profile;
-        progressRef.current = progress;
 
         if (allChallenges && allChallenges.length > 0) {
           setCatalog(allChallenges);
         }
+        setActivePlan(plan);
 
-        const activeWeakness = progress?.activeWeaknesses?.[0];
-        const lowestSkill = progress?.skills
-          ? [...progress.skills].sort((a, b) => a.currentScore - b.currentScore)[0]
-          : undefined;
-
+        // Curated recommendation fallback matching the plan's target weakness or skill
         let recommended: Challenge | undefined;
 
-        if (activeWeakness) {
+        if (plan.targetWeakness) {
           recommended = allChallenges.find(
             (c) =>
-              c.targetWeakness?.toLowerCase() === activeWeakness.type.toLowerCase() ||
-              c.targetSkill.toLowerCase() === activeWeakness.skillName.toLowerCase()
+              c.targetWeakness?.toLowerCase() === plan.targetWeakness?.toLowerCase() ||
+              c.targetSkill.toLowerCase() === plan.targetWeakness?.toLowerCase()
           );
         }
 
-        if (!recommended && lowestSkill) {
+        if (!recommended && plan.targetSkill) {
           recommended = allChallenges.find(
-            (c) => c.targetSkill.toLowerCase() === lowestSkill.skillName.toLowerCase()
+            (c) => c.targetSkill.toLowerCase() === plan.targetSkill.toLowerCase()
           );
-        }
-
-        if (!recommended && profile?.primaryGoal) {
-          recommended = allChallenges.find((c) => c.goalTags.includes(profile.primaryGoal!));
         }
 
         if (recommended) {
           setCurrentChallenge(recommended);
         }
 
-        // If Gemini key is available, generate a personalized AI challenge
+        // If Gemini BYOK key is connected, generate a live personalized AI challenge
         if (geminiApiKey) {
           generateAiTopic(geminiApiKey);
         }
@@ -162,7 +164,7 @@ export const Practice: React.FC = () => {
         ...baseTemplate,
         title: aiChallenge.challenge_title,
         prompt: aiChallenge.challenge_prompt,
-        whyItMatters: aiChallenge.why_this_challenge,
+        whyItMatters: aiChallenge.why_this_challenge || aiChallenge.why_this_question || baseTemplate.whyItMatters,
         durationSeconds: aiChallenge.time_limit_seconds || 60,
         instructions: aiChallenge.success_criteria || baseTemplate.instructions,
       };
@@ -170,6 +172,7 @@ export const Practice: React.FC = () => {
       analytics.track('quick_practice_started', {
         challenge_id: baseTemplate.id,
         target_skill: aiChallenge.target_skill,
+        category: aiChallenge.category,
         is_ai_personalized: true,
       });
 
@@ -186,6 +189,16 @@ export const Practice: React.FC = () => {
     }
   };
 
+  const formatCategoryLabel = (cat?: string) => {
+    if (!cat) return 'Targeted Drill';
+    return cat.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+  };
+
+  const formatContextLabel = (ctx?: string) => {
+    if (!ctx) return 'Practice';
+    return ctx.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+  };
+
   return (
     <AppShell title="Quick Practice">
       <PageContainer className="space-y-4">
@@ -195,10 +208,10 @@ export const Practice: React.FC = () => {
             <Zap className="w-3.5 h-3.5" /> Instant Speaking Drill
           </div>
           <h2 className="text-xl font-bold tracking-tight text-foreground">
-            Quick Practice
+            Personalized Practice
           </h2>
           <p className="text-xs text-muted-foreground leading-relaxed">
-            One focused speaking challenge tailored to compound your conversational confidence.
+            Deliberate speaking drills tailored to your specific role, weakness, and communication goals.
           </p>
         </div>
 
@@ -235,32 +248,42 @@ export const Practice: React.FC = () => {
         {hasGeminiKey && aiChallenge ? (
           <Card className="border border-primary/60 bg-gradient-to-br from-primary/20 via-primary/5 to-card shadow-lg">
             <CardContent className="p-5 space-y-4">
-              <div className="flex items-start justify-between gap-2">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-primary uppercase tracking-wider">
-                      <Sparkles className="w-3 h-3 text-amber-400" /> {aiChallenge.target_skill} Drill
+              <div className="space-y-2.5">
+                {/* Taxonomy & Context Meta Badges */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-primary px-2.5 py-0.5 rounded-full bg-primary/15 border border-primary/30">
+                    <Sparkles className="w-3 h-3 text-amber-400" />
+                    {formatContextLabel(aiChallenge.practice_context)} · {formatCategoryLabel(aiChallenge.category)}
+                  </span>
+
+                  {activePlan?.targetRole && (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-foreground px-2 py-0.5 rounded bg-secondary/80 border border-border/60">
+                      <Briefcase className="w-3 h-3 text-muted-foreground" /> {activePlan.targetRole}
                     </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-secondary text-muted-foreground font-semibold">
-                      Level {aiChallenge.difficulty}/5
-                    </span>
-                  </div>
+                  )}
+
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-secondary text-muted-foreground font-semibold">
+                    Level {aiChallenge.difficulty}/5
+                  </span>
+                </div>
+
+                <div className="flex items-start justify-between gap-2">
                   <h3 className="text-lg font-bold text-foreground leading-snug">
                     "{aiChallenge.challenge_prompt}"
                   </h3>
-                </div>
-                <div className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-secondary text-foreground text-xs font-semibold shrink-0">
-                  <Clock className="w-3.5 h-3.5 text-muted-foreground" />
-                  <span>{aiChallenge.time_limit_seconds || 60}s</span>
+                  <div className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-secondary text-foreground text-xs font-semibold shrink-0">
+                    <Clock className="w-3.5 h-3.5 text-muted-foreground" />
+                    <span>{aiChallenge.time_limit_seconds || 60}s</span>
+                  </div>
                 </div>
               </div>
 
-              {/* Why this challenge */}
+              {/* Why this question */}
               <div className="p-3 rounded-xl bg-card/70 border border-border/60 text-xs text-muted-foreground leading-relaxed space-y-1">
                 <span className="font-semibold text-foreground flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-primary">
-                  <Bot className="w-3.5 h-3.5" /> Why You're Practicing This:
+                  <Target className="w-3.5 h-3.5" /> Why You're Practicing This:
                 </span>
-                <p>{aiChallenge.why_this_challenge}</p>
+                <p>{aiChallenge.why_this_question || aiChallenge.why_this_challenge}</p>
               </div>
 
               {/* Success Criteria */}
@@ -308,7 +331,7 @@ export const Practice: React.FC = () => {
                 >
                   {isGeneratingAi ? (
                     <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Tailoring New Challenge...
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Tailoring Next Challenge...
                     </>
                   ) : (
                     <>

@@ -9,12 +9,21 @@ const corsHeaders = {
 
 interface GenerateTopicPayload {
   primary_goal?: string;
+  user_goal?: string;
+  practice_context?: string;
   target_role?: string;
   active_weakness?: string;
+  target_skill?: string;
   weakest_skill?: string;
+  question_category?: string;
+  difficulty?: number;
   current_level?: number;
   template_type?: string;
+  training_objective?: string;
+  time_limit_seconds?: number;
   recent_prompts?: string[];
+  avoid_prompts?: string[];
+  recent_categories?: string[];
 }
 
 interface AnalyzeAttemptPayload {
@@ -218,34 +227,69 @@ serve(async (req: Request) => {
     if (action === "generate_topic") {
       const payload = (body.payload || {}) as GenerateTopicPayload;
 
-      const systemInstruction = `You are Verblyn's expert communication coach.
-Generate a tailored, high-impact speaking challenge for a professional/student based on their profile.
-DO NOT create a generic topic. Contextualize the prompt with realistic workplace or conversational constraints.
+      const systemInstruction = `You are Verblyn's expert AI communication & vocal coach.
+Generate a tailored, high-impact speaking challenge strictly driven by the authoritative training plan provided by Verblyn.
+
+MANDATORY RULES:
+1. THE TRAINING PLAN IS AUTHORITATIVE: Strictly adhere to the requested practice context, category, target skill, weakness, and training objective.
+2. DO NOT CHANGE THE CATEGORY: Generate a challenge that matches the requested "question_category" (e.g. project_deep_dive, behavioral, status_update, etc.).
+3. GROUND IN TARGET ROLE: Ground the scenario in the realistic workplace or interview situations of the target role (e.g. Data Analyst, Software Engineer, Manager).
+4. NO GENERIC CASUAL TOPICS FOR CAREER CONTEXTS: If the context is "interview" or "workplace", NEVER generate casual prompts like "Describe your favorite movie" or "Talk about your hobby".
+5. RESPECT THE TRAINING OBJECTIVE: Structure the prompt and instructions so that successfully speaking requires fulfilling the "training_objective".
+6. RESPECT DIFFICULTY: Calibrate scenario nuance, question depth, and time constraint to the specified difficulty level (1-5).
+7. ANTI-REPETITION: Do NOT repeat, paraphrase, or closely mimic any prompt in "avoid_prompts" or recent categories in "recent_categories".
+8. AUTHENTICITY: Make the exercise feel real (e.g., explaining a technical bottleneck, answering a tough STAR behavioral question, briefing an executive).
+9. TARGET WEAKNESS: The challenge constraints and success criteria must directly force the user to correct their "active_weakness".
+10. ZERO FABRICATION: Do not invent false personal achievements, company names, or resume facts for the user. Frame the prompt open-ended so the user speaks about their real experience.
+11. ROLE-RELEVANT COMMUNICATION: If the target role is technical (e.g. Data Analyst), focus on communicating data impact, project challenges, and analytical tradeoffs rather than writing code.
+12. ACTIONABLE COACHING: Provide realistic success criteria, a concise explanation in "why_this_question", and a high-leverage "coach_tip_before_start".
+
 Return STRICT JSON adhering to this schema:
 {
   "challenge_title": string,
   "challenge_prompt": string,
   "challenge_type": string,
+  "category": string,
+  "practice_context": string,
   "target_skill": "Fluency" | "Clarity" | "Vocabulary" | "Grammar" | "Confidence",
   "target_weakness": string,
   "difficulty": number,
   "time_limit_seconds": number,
-  "success_criteria": string[],
+  "training_objective": string,
+  "why_this_question": string,
   "why_this_challenge": string,
+  "success_criteria": string[],
   "follow_up_question": string,
   "coach_tip_before_start": string
 }`;
 
-      const userContent = `User Profile:
-- Goal: ${payload.primary_goal || "Everyday Communication"}
-- Target Role: ${payload.target_role || "Professional / Student"}
-- Active Weakness: ${payload.active_weakness || "Filler words & hesitation"}
-- Weakest Skill: ${payload.weakest_skill || "Fluency"}
-- Current Level: ${payload.current_level || 1}
-- Preferred Template/Archetype: ${payload.template_type || "Explain Simply"}
-- Recent Prompts to avoid repeating: ${JSON.stringify(payload.recent_prompts || [])}
+      const practiceContext = payload.practice_context || "interview";
+      const targetRole = payload.target_role || "Student / Professional";
+      const targetSkill = payload.target_skill || payload.weakest_skill || "Clarity";
+      const activeWeakness = payload.active_weakness || "unclear_structure";
+      const questionCategory = payload.question_category || "project_deep_dive";
+      const difficulty = payload.difficulty || payload.current_level || 2;
+      const trainingObjective =
+        payload.training_objective ||
+        `Practice structured, concise communication tailored for ${targetRole}.`;
+      const timeLimitSeconds = payload.time_limit_seconds || 60;
+      const avoidPrompts = payload.avoid_prompts || payload.recent_prompts || [];
+      const recentCategories = payload.recent_categories || [];
 
-Generate one distinct, personalized speaking drill for this user.`;
+      const userContent = `AUTHORITATIVE TRAINING PLAN:
+- User Goal: ${payload.user_goal || payload.primary_goal || "Campus Placements / Career Growth"}
+- Practice Context: ${practiceContext}
+- Target Role / Domain: ${targetRole}
+- Target Skill: ${targetSkill}
+- Active Weakness: ${activeWeakness}
+- Question Category: ${questionCategory}
+- Difficulty Level: ${difficulty} / 5
+- Time Limit: ${timeLimitSeconds} seconds
+- Training Objective: ${trainingObjective}
+- Avoid Prompts (Do NOT repeat): ${JSON.stringify(avoidPrompts)}
+- Avoid Recent Categories: ${JSON.stringify(recentCategories)}
+
+Generate exactly ONE tailored speaking drill adhering strictly to this training plan.`;
 
       const res = await fetch(geminiEndpoint, {
         method: "POST",
@@ -273,12 +317,25 @@ Generate one distinct, personalized speaking drill for this user.`;
         return buildErrorResponse("Gemini returned an empty response", "EMPTY_RESPONSE", 500);
       }
 
-      let parsed: unknown;
+      let parsed: Record<string, unknown>;
       try {
         parsed = JSON.parse(rawText);
       } catch {
         return buildErrorResponse("Failed to parse model output JSON", "INVALID_AI_RESPONSE", 500);
       }
+
+      // Ensure fallback properties for guaranteed schema consistency
+      if (!parsed.why_this_challenge && parsed.why_this_question) {
+        parsed.why_this_challenge = parsed.why_this_question as string;
+      } else if (!parsed.why_this_question && parsed.why_this_challenge) {
+        parsed.why_this_question = parsed.why_this_challenge as string;
+      }
+      if (!parsed.practice_context) parsed.practice_context = practiceContext;
+      if (!parsed.category) parsed.category = questionCategory;
+      if (!parsed.target_skill) parsed.target_skill = targetSkill;
+      if (!parsed.target_weakness) parsed.target_weakness = activeWeakness;
+      if (!parsed.training_objective) parsed.training_objective = trainingObjective;
+      if (!parsed.time_limit_seconds) parsed.time_limit_seconds = timeLimitSeconds;
 
       return buildSuccessResponse("generate_topic", parsed);
     }
