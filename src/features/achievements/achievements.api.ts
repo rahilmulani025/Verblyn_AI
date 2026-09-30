@@ -10,16 +10,26 @@ export const achievementsApi = {
     let totalSessions = 0;
 
     if (userId) {
-      const { data: progress } = await supabase
-        .from('user_progress')
-        .select('*')
-        .eq('user_id', userId)
-        .maybeSingle();
+      const [{ data: streakRow }, { count: attemptCount }, { data: progress }] = await Promise.all([
+        supabase
+          .from('user_streaks')
+          .select('current_streak, longest_streak')
+          .eq('user_id', userId)
+          .maybeSingle(),
+        supabase
+          .from('challenge_attempts')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', userId)
+          .eq('status', 'COMPLETED'),
+        supabase
+          .from('user_progress')
+          .select('*')
+          .eq('user_id', userId)
+          .maybeSingle(),
+      ]);
 
-      if (progress) {
-        currentStreak = progress.current_streak || 0;
-        totalSessions = progress.total_sessions || 0;
-      }
+      currentStreak = streakRow?.current_streak || progress?.current_streak || 0;
+      totalSessions = attemptCount !== null ? attemptCount : progress?.total_sessions || 0;
     }
 
     const list: Achievement[] = [
