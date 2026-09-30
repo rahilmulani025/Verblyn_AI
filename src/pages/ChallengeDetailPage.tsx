@@ -62,6 +62,8 @@ export const ChallengeDetailPage: React.FC = () => {
   const timerRef = useRef<number | null>(null);
   const countdownRef = useRef<number | null>(null);
 
+  const submittingRef = useRef<boolean>(false);
+
   const {
     isListening,
     transcript,
@@ -72,6 +74,7 @@ export const ChallengeDetailPage: React.FC = () => {
     isSupported,
     error: speechError,
     getAudioBlob,
+    getFinalAudioBlob,
   } = useSpeechRecognition();
 
   // Load challenge metadata if not passed from state
@@ -113,8 +116,8 @@ export const ChallengeDetailPage: React.FC = () => {
   }, [speechError]);
 
   // Handle active listening timer
-  const handleStopSpeaking = useCallback(() => {
-    stopListening();
+  const handleStopSpeaking = useCallback(async () => {
+    await stopListening();
     setStatus('SUBMITTED');
   }, [stopListening]);
 
@@ -174,17 +177,20 @@ export const ChallengeDetailPage: React.FC = () => {
   const currentWords = (transcript || '').trim().split(/\s+/).filter(Boolean).length;
   const currentWpm = seconds > 0 ? Math.round((currentWords / seconds) * 60) : 0;
 
-  // Submit attempt
+  // Submit attempt with authoritative Gemini transcription pipeline
   const handleSubmit = async () => {
     if (!challenge) return;
-    const rawTranscript = (transcript || '').trim();
+    if (submittingRef.current) return; // Prevent double submission
 
-    if (!rawTranscript && seconds < 3) {
+    const rawLiveTranscript = (transcript || '').trim();
+
+    if (!rawLiveTranscript && seconds < 3) {
       setErrorMessage('No speech captured yet. Please speak your answer and submit.');
       setStatus('STARTED');
       return;
     }
 
+    submittingRef.current = true;
     setSubmitting(true);
     setStatus('ANALYZING');
     setErrorMessage(null);
@@ -200,18 +206,18 @@ export const ChallengeDetailPage: React.FC = () => {
     });
 
     try {
-      const finalTranscript =
-        rawTranscript ||
-        `Delivered structured response addressing the prompt: "${challenge.prompt}".`;
       const elapsed = Math.max(seconds, 5);
-      const metrics = calculateSpeechMetrics(finalTranscript, elapsed);
+      let authoritativeTranscript =
+        rawLiveTranscript ||
+        `Delivered structured response addressing the prompt: "${challenge.prompt}".`;
+      let calculatedMetrics = calculateSpeechMetrics(authoritativeTranscript, elapsed);
 
       let aiAnalysis: AIAnalysisResult | undefined;
 
-      // Real Gemini Evaluation if key is connected
+      // Real Gemini Evaluation & Authoritative Audio Transcription
       if (geminiApiKey) {
         try {
-          const audioBlob = getAudioBlob?.();
+          const audioBlob = await getFinalAudioBlob();
           let audioBase64: string | undefined;
 
           if (audioBlob && audioBlob.size > 0 && audioBlob.size <= 15 * 1024 * 1024) {
@@ -226,21 +232,27 @@ export const ChallengeDetailPage: React.FC = () => {
             time_limit_seconds: challenge.durationSeconds,
             success_criteria: challenge.instructions,
             user_goal: 'Professional Speaking',
-            transcript: finalTranscript,
+            transcript: authoritativeTranscript,
             audio_base64: audioBase64,
             audio_mime_type: audioBlob?.type || 'audio/webm',
             deterministic_metrics: {
               durationSeconds: elapsed,
-              wordCount: metrics.wordCount,
-              wordsPerMinute: metrics.wpm,
-              fillerCount: metrics.fillerStats.total,
-              repetitionCount: metrics.repetitionStats.total,
-              sentenceCount: Math.max(1, finalTranscript.split(/[.!?]+/).filter(Boolean).length),
-              averageSentenceLength: metrics.averageSentenceLength,
-              vocabularyDiversity: metrics.vocabularyDiversity,
+              wordCount: calculatedMetrics.wordCount,
+              wordsPerMinute: calculatedMetrics.wpm,
+              fillerCount: calculatedMetrics.fillerStats.total,
+              repetitionCount: calculatedMetrics.repetitionStats.total,
+              sentenceCount: Math.max(1, authoritativeTranscript.split(/[.!?]+/).filter(Boolean).length),
+              averageSentenceLength: calculatedMetrics.averageSentenceLength,
+              vocabularyDiversity: calculatedMetrics.vocabularyDiversity,
               isComplete: true,
             },
           });
+
+          // If Gemini produced an authoritative audio transcription, update final transcript & metrics
+          if (aiAnalysis && aiAnalysis.transcription && aiAnalysis.transcription.trim().length > 0) {
+            authoritativeTranscript = aiAnalysis.transcription.trim();
+            calculatedMetrics = calculateSpeechMetrics(authoritativeTranscript, elapsed);
+          }
         } catch (geminiErr) {
           if (process.env.NODE_ENV === 'development') {
             console.warn('Gemini evaluation notice (falling back to server analysis):', geminiErr);
@@ -250,9 +262,9 @@ export const ChallengeDetailPage: React.FC = () => {
 
       const attemptResult = await attemptApi.submitChallengeAttempt({
         challenge,
-        transcript: finalTranscript,
+        transcript: authoritativeTranscript,
         durationSeconds: elapsed,
-        metrics,
+        metrics: calculatedMetrics,
         isDailyMission,
         aiAnalysis,
       });
@@ -296,6 +308,7 @@ export const ChallengeDetailPage: React.FC = () => {
       setErrorMessage('An unexpected error occurred during submission.');
       setStatus('SUBMITTED');
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -476,7 +489,7 @@ export const ChallengeDetailPage: React.FC = () => {
             {(transcript || interimTranscript) && (
               <div className="w-full p-3.5 rounded-xl bg-secondary/50 border border-border/40 text-xs text-foreground leading-relaxed max-h-32 overflow-y-auto">
                 <h4 className="font-semibold text-muted-foreground text-[11px] mb-1">
-                  Live Transcript:
+                  Live Transcription (Preview):
                 </h4>
                 <p>
                   {transcript}

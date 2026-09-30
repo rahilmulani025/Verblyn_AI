@@ -92,6 +92,7 @@ export interface AISkillBreakdown {
 }
 
 export interface AIAnalysisResult {
+  transcription?: string; // Authoritative verbatim transcription generated directly from spoken audio
   overall_score: number;
   task_completion: AITaskCompletion;
   skills: AISkillBreakdown;
@@ -102,6 +103,16 @@ export interface AIAnalysisResult {
   recommended_drill_type: string;
   recommendation_reason: string;
   confidence_in_evaluation: number;
+}
+
+export interface TranscribeAudioPayload {
+  audio_base64: string;
+  audio_mime_type?: string;
+}
+
+export interface TranscribeAudioResult {
+  transcript: string;
+  detected_language?: string;
 }
 
 export interface GenerateTopicPayload {
@@ -128,12 +139,20 @@ export interface AnalyzeAttemptPayload {
   deterministic_metrics: SpeakingMetrics;
 }
 
-export type AICoachAction = 'test_connection' | 'generate_topic' | 'analyze_attempt';
+export type AICoachAction =
+  | 'test_connection'
+  | 'generate_topic'
+  | 'analyze_attempt'
+  | 'transcribe_audio';
 
 export interface AICoachRequest {
   action: AICoachAction;
   gemini_api_key: string;
-  payload?: GenerateTopicPayload | AnalyzeAttemptPayload | Record<string, unknown>;
+  payload?:
+    | GenerateTopicPayload
+    | AnalyzeAttemptPayload
+    | TranscribeAudioPayload
+    | Record<string, unknown>;
 }
 
 export interface AICoachResponse<T = unknown> {
@@ -143,4 +162,5 @@ export interface AICoachResponse<T = unknown> {
   error?: string | { code?: string; message?: string };
   code?: string;
 }
+
 

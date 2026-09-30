@@ -274,7 +274,7 @@ export const attemptApi = {
               p_weakness_candidates: weaknessCandidates as unknown as Json,
               p_coach_message: ai.coach_summary || `Evaluated by Gemini AI Coach.`,
               p_recommended_focus: ai.next_focus || input.challenge.targetSkill,
-              p_analysis_version: 'gemini-2.5-flash-byok',
+              p_analysis_version: 'gemini-3.8-flash-byok',
               p_is_daily_mission: Boolean(input.isDailyMission),
               p_is_weakness: isWeaknessTarget,
               p_is_personal_best: isPersonalBest,
@@ -307,7 +307,7 @@ export const attemptApi = {
             coachMessage: ai.coach_summary,
             recommendedFocus: ai.next_focus,
             weaknessCandidates,
-            analysisVersion: 'gemini-2.5-flash-byok',
+            analysisVersion: 'gemini-3.8-flash-byok',
             xpEarned: prog?.earned_xp || {
               base: input.challenge.xpReward || 30,
               dailyBonus: input.isDailyMission ? 20 : 0,

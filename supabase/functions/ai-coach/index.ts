@@ -42,7 +42,7 @@ interface AnalyzeAttemptPayload {
 }
 
 interface RequestBody {
-  action: "test_connection" | "generate_topic" | "analyze_attempt";
+  action: "test_connection" | "generate_topic" | "analyze_attempt" | "transcribe_audio";
   gemini_api_key?: string;
   payload?: GenerateTopicPayload | AnalyzeAttemptPayload | Record<string, unknown>;
 }
@@ -293,13 +293,15 @@ Generate one distinct, personalized speaking drill for this user.`;
 
       const systemInstruction = `You are Verblyn's rigorous, honest AI vocal & communication coach.
 EVALUATION PRINCIPLES:
-1. DO NOT give automatic praise or generic flattery.
-2. Base every score and feedback point strictly on concrete evidence in the spoken response.
-3. If the user was off-topic, incomplete, vague, repetitive, or full of filler words, state it directly.
-4. Each strength MUST quote or pinpoint exact words/structures used.
-5. Each improvement MUST quote the exact problem and provide an actionable correction.
-6. Return STRICT JSON with this schema:
+1. VERBATIM TRANSCRIPTION: If audio is provided, listen to the speech waveform and produce a 100% VERBATIM transcription in the "transcription" field. Preserve all filler sounds ("um", "uh", "ah", "like", "you know"), repetitions, false starts, and hesitations without smoothing or auto-correcting grammar.
+2. DO NOT give automatic praise or generic flattery.
+3. Base every score and feedback point strictly on concrete evidence in the spoken response.
+4. If the user was off-topic, incomplete, vague, repetitive, or full of filler words, state it directly.
+5. Each strength MUST quote or pinpoint exact words/structures used.
+6. Each improvement MUST quote the exact problem and provide an actionable correction.
+7. Return STRICT JSON with this schema:
 {
+  "transcription": string,
   "overall_score": number,
   "task_completion": {
     "score": number,
@@ -409,6 +411,69 @@ Evaluate the attempt rigorously according to the instructions.`;
       }
 
       return buildSuccessResponse("analyze_attempt", parsed);
+    }
+
+    // 7. ACTION: TRANSCRIBE_AUDIO
+    if (action === "transcribe_audio") {
+      const payload = (body.payload || {}) as { audio_base64?: string; audio_mime_type?: string };
+      if (!payload.audio_base64) {
+        return buildErrorResponse("Audio data is required for transcription", "INVALID_PAYLOAD", 400);
+      }
+
+      const systemInstruction = `You are a high-precision verbatim speech transcriptionist.
+Transcribe the provided audio EXACTLY as spoken.
+CRITICAL RULES:
+1. Preserve all filler words (e.g. "um", "uh", "ah", "like", "you know", "actually", "basically").
+2. Preserve all repetitions, false starts, and hesitations (e.g. "I think, I think that...").
+3. DO NOT smooth, summarize, censor, or auto-correct grammatical errors.
+4. Output STRICT JSON: { "transcript": string, "detected_language": string }`;
+
+      const res = await fetch(geminiEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          contents: [
+            {
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: payload.audio_mime_type || "audio/webm",
+                    data: payload.audio_base64,
+                  },
+                },
+                { text: "Transcribe this audio recording verbatim." },
+              ],
+            },
+          ],
+          generationConfig: {
+            responseMimeType: "application/json",
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        const mapped = await parseGeminiError(res);
+        return buildErrorResponse(mapped.message, mapped.code, res.status);
+      }
+
+      const resData = await res.json();
+      const rawText = resData?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!rawText) {
+        return buildErrorResponse("Gemini returned an empty transcription", "EMPTY_TRANSCRIPTION", 500);
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(rawText);
+      } catch {
+        return buildErrorResponse("Failed to parse transcription output JSON", "INVALID_AI_RESPONSE", 500);
+      }
+
+      return buildSuccessResponse("transcribe_audio", parsed);
     }
 
     return buildErrorResponse(`Unknown action: ${action}`, "INVALID_ACTION", 400);

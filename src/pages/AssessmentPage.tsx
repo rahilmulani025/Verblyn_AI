@@ -35,6 +35,8 @@ export const AssessmentPage: React.FC = () => {
   const timerRef = useRef<number | null>(null);
   const countdownRef = useRef<number | null>(null);
 
+  const submittingRef = useRef<boolean>(false);
+
   // 2. Speech Recognition Hook
   const {
     isListening,
@@ -48,8 +50,8 @@ export const AssessmentPage: React.FC = () => {
   } = useSpeechRecognition();
 
   // 3. Callback Handlers (Declared BEFORE any effects that reference them)
-  const handleStopSpeaking = useCallback(() => {
-    stopListening();
+  const handleStopSpeaking = useCallback(async () => {
+    await stopListening();
     setState('PROCESSING');
   }, [stopListening]);
 
@@ -131,6 +133,7 @@ export const AssessmentPage: React.FC = () => {
   const currentWpm = seconds > 0 ? Math.round((currentWords / seconds) * 60) : 0;
 
   const handleSubmit = async () => {
+    if (submittingRef.current) return;
     const rawTranscript = (transcript || '').trim();
 
     if (!rawTranscript && seconds < 3) {
@@ -139,6 +142,7 @@ export const AssessmentPage: React.FC = () => {
       return;
     }
 
+    submittingRef.current = true;
     setSubmitting(true);
     setErrorMessage(null);
 
@@ -193,6 +197,7 @@ export const AssessmentPage: React.FC = () => {
       setErrorMessage('An unexpected error occurred during analysis.');
       setState('PROCESSING');
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -321,7 +326,7 @@ export const AssessmentPage: React.FC = () => {
             {(transcript || interimTranscript) && (
               <div className="w-full p-3.5 rounded-xl bg-secondary/50 border border-border/40 text-xs text-foreground leading-relaxed max-h-32 overflow-y-auto">
                 <h4 className="font-semibold text-muted-foreground text-[11px] mb-1">
-                  Live Transcript:
+                  Live Transcription (Preview):
                 </h4>
                 <p>
                   {transcript}

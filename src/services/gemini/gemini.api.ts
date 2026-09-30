@@ -9,6 +9,8 @@ import {
   GeminiConnectionResult,
   GenerateTopicPayload,
   PersonalizedChallenge,
+  TranscribeAudioPayload,
+  TranscribeAudioResult,
 } from './gemini.types';
 
 export const geminiApi = {
@@ -19,6 +21,20 @@ export const geminiApi = {
     return invokeAiCoach<GeminiConnectionResult>({
       action: 'test_connection',
       gemini_api_key: apiKey,
+    });
+  },
+
+  /**
+   * Transcribes audio directly to verbatim text via Gemini
+   */
+  async transcribeAudio(
+    apiKey: string,
+    payload: TranscribeAudioPayload
+  ): Promise<TranscribeAudioResult> {
+    return invokeAiCoach<TranscribeAudioResult>({
+      action: 'transcribe_audio',
+      gemini_api_key: apiKey,
+      payload,
     });
   },
 
@@ -50,3 +66,4 @@ export const geminiApi = {
     });
   },
 };
+
