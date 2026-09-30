@@ -8,7 +8,7 @@
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
-    "test": "npx tsx scripts/verify-learning-engine.ts",
+    "test": "npx tsx scripts/verify-learning-engine.ts && npx tsx scripts/verify-auth-byok-persistence.ts",
     "preview": "vite preview"
   },
   "dependencies": {

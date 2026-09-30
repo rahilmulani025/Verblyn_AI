@@ -7,6 +7,7 @@ import { AuthGuard, GuestGuard, OnboardingGuard, AssessmentGuard } from '@/app/g
 // Pages
 import Index from '@/pages/Index';
 import Auth from '@/pages/Auth';
+import ResetPasswordPage from '@/pages/ResetPasswordPage';
 import OnboardingPage from '@/pages/OnboardingPage';
 import AssessmentPage from '@/pages/AssessmentPage';
 import AssessmentResultPage from '@/pages/AssessmentResultPage';
@@ -28,7 +29,13 @@ export const AppRoutes: React.FC = () => {
       {/* Guest / Auth Routes */}
       <Route element={<GuestGuard />}>
         <Route path="/auth" element={<Auth />} />
+        <Route path="/login" element={<Navigate to="/auth" replace />} />
+        <Route path="/signup" element={<Navigate to="/auth" replace />} />
       </Route>
+
+      {/* Dedicated Password Recovery Flow */}
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/forgot-password" element={<Navigate to="/auth?mode=reset" replace />} />
 
       {/* Onboarding Flow */}
       <Route element={<OnboardingGuard />}>

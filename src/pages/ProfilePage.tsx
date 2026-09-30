@@ -243,27 +243,68 @@ export const ProfilePage: React.FC = () => {
         {/* AI COACH SETTINGS (BYOK) */}
         <div className="space-y-2">
           <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-            <Bot className="w-4 h-4 text-primary" /> AI Coach Settings (BYOK)
+            <Bot className="w-4 h-4 text-primary" /> Gemini AI (BYOK)
           </h3>
-          <Card className="border border-primary/30 bg-primary/5">
-            <CardContent className="p-3.5 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-xs font-bold text-foreground">Google Gemini Key</h4>
-                  <p className="text-[11px] text-muted-foreground">
-                    {hasGeminiKey ? 'API Key Active (Memory Session)' : 'Not Connected'}
-                  </p>
+          <Card className="border border-border/80 bg-card">
+            <CardContent className="p-4 space-y-3">
+              {hasGeminiKey ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-[11px] text-muted-foreground font-medium">Status</span>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse" />
+                        <span className="text-xs font-semibold text-emerald-400">Connected</span>
+                      </div>
+                    </div>
+                    <div>
+                      <span className="text-[11px] text-muted-foreground font-medium">API key</span>
+                      <p className="text-xs font-mono text-foreground mt-0.5 tracking-widest select-none">
+                        ••••••••••••••••••••
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-2 border-t border-border/40">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setKeyModalOpen(true)}
+                      className="text-xs font-medium gap-1.5 border-border"
+                    >
+                      <KeyRound className="w-3.5 h-3.5 text-primary" /> Change key
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => clearGeminiApiKey()}
+                      className="text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10"
+                    >
+                      Remove key
+                    </Button>
+                  </div>
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setKeyModalOpen(true)}
-                  className="text-xs font-semibold gap-1.5 border-primary/30 text-primary"
-                >
-                  <KeyRound className="w-3.5 h-3.5" />
-                  {hasGeminiKey ? 'Manage Key' : 'Connect Key'}
-                </Button>
-              </div>
+              ) : (
+                <div className="space-y-3">
+                  <div>
+                    <span className="text-[11px] text-muted-foreground font-medium">Status</span>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="w-2 h-2 rounded-full bg-muted-foreground/40 inline-block" />
+                      <span className="text-xs font-medium text-muted-foreground">Not connected</span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Connect your Gemini API key to enable AI-powered personalized practice and communication analysis.
+                  </p>
+                  <Button
+                    size="sm"
+                    onClick={() => setKeyModalOpen(true)}
+                    className="text-xs font-semibold gap-1.5 shadow-sm"
+                  >
+                    <KeyRound className="w-3.5 h-3.5" /> Add Gemini key
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
