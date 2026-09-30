@@ -1,7 +1,14 @@
-project_id = "jopgfbnlhjpjbtnhapev"
+project_id = "omazwpvkdqtsiakeulru"
+
+[functions.ai-coach]
+verify_jwt = false
+
+[functions.analyze-attempt]
+verify_jwt = false
 
 [functions.analyze-speech]
 verify_jwt = false
 
 [functions.generate-topic]
 verify_jwt = false
+

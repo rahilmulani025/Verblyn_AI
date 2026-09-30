@@ -67,7 +67,10 @@ function buildErrorResponse(message: string, code = "AI_SERVICE_ERROR", status =
   return new Response(
     JSON.stringify({
       success: false,
-      error: message,
+      error: {
+        code,
+        message,
+      },
       code,
     }),
     {
@@ -77,28 +80,62 @@ function buildErrorResponse(message: string, code = "AI_SERVICE_ERROR", status =
   );
 }
 
-function mapGeminiStatusToCode(status: number): { code: string; message: string } {
-  if (status === 400 || status === 401 || status === 403) {
+async function parseGeminiError(res: Response): Promise<{ code: string; message: string }> {
+  let errorJson: { error?: { code?: number; message?: string; status?: string; details?: unknown[] } } | null = null;
+  try {
+    errorJson = await res.json();
+  } catch {
+    // ignore
+  }
+
+  const status = res.status;
+  const rawMsg = errorJson?.error?.message || "";
+  const statusStr = errorJson?.error?.status || "";
+  const lowerMsg = rawMsg.toLowerCase();
+  const detailsStr = JSON.stringify(errorJson?.error?.details || "").toLowerCase();
+
+  if (
+    (status === 400 && (lowerMsg.includes("api key") || lowerMsg.includes("apikey") || detailsStr.includes("api_key"))) ||
+    status === 401 ||
+    (status === 403 && (lowerMsg.includes("key") || statusStr === "PERMISSION_DENIED" || detailsStr.includes("api_key")))
+  ) {
     return {
       code: "INVALID_API_KEY",
-      message: "Gemini rejected this API key. Check the key and your Google AI Studio permissions.",
+      message: "Gemini rejected this API key. Please check your API key in Google AI Studio and ensure it has active permissions.",
     };
   }
-  if (status === 429) {
+
+  if (status === 429 || statusStr === "RESOURCE_EXHAUSTED" || lowerMsg.includes("quota") || lowerMsg.includes("rate limit")) {
     return {
       code: "QUOTA_EXCEEDED",
-      message: "Your Gemini API quota limit has been reached. Please retry in a few moments.",
+      message: "Your Gemini API quota limit has been reached. Please retry in a few moments or check your Google AI Studio quota.",
     };
   }
+
+  if (status === 404 || statusStr === "NOT_FOUND") {
+    return {
+      code: "MODEL_UNAVAILABLE",
+      message: `Gemini model ${GEMINI_MODEL} was not found or is unavailable in your region.`,
+    };
+  }
+
+  if (status === 400) {
+    return {
+      code: "INVALID_REQUEST",
+      message: rawMsg ? `Invalid AI request: ${rawMsg}` : "The request format was rejected by Gemini.",
+    };
+  }
+
   if (status >= 500) {
     return {
       code: "GEMINI_PROVIDER_ERROR",
-      message: "Google Gemini service encountered an error. Please try again.",
+      message: "Google Gemini service encountered a temporary error. Please try again in a few moments.",
     };
   }
+
   return {
     code: "GEMINI_SERVICE_ERROR",
-    message: "Failed to communicate with AI provider.",
+    message: rawMsg || "Failed to communicate with AI provider.",
   };
 }
 
@@ -110,25 +147,24 @@ serve(async (req: Request) => {
 
   try {
     // 2. Validate Authenticated Supabase User Context
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
+    const authHeader = req.headers.get("Authorization") || "";
+    const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+    if (!token) {
       return buildErrorResponse("Unauthorized. Authentication token is required.", "UNAUTHORIZED", 401);
     }
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
-    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") || "";
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") || "https://omazwpvkdqtsiakeulru.supabase.co";
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") || "sb_publishable_O6Qp_VU1ioECtOXRR-Z8GQ_OCyLV_o3";
 
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
     const {
       data: { user },
       error: userAuthError,
-    } = await supabase.auth.getUser();
+    } = await supabase.auth.getUser(token);
 
     if (userAuthError || !user) {
-      return buildErrorResponse("Unauthorized. Invalid authentication session.", "UNAUTHORIZED", 401);
+      return buildErrorResponse("Unauthorized. Invalid or expired authentication session. Please sign in again.", "UNAUTHORIZED", 401);
     }
 
     // 3. Parse & Validate Request Body
@@ -166,7 +202,7 @@ serve(async (req: Request) => {
       const latencyMs = Date.now() - startTime;
 
       if (!res.ok) {
-        const mapped = mapGeminiStatusToCode(res.status);
+        const mapped = await parseGeminiError(res);
         return buildErrorResponse(mapped.message, mapped.code, res.status);
       }
 
@@ -228,7 +264,7 @@ Generate one distinct, personalized speaking drill for this user.`;
       });
 
       if (!res.ok) {
-        const mapped = mapGeminiStatusToCode(res.status);
+        const mapped = await parseGeminiError(res);
         return buildErrorResponse(mapped.message, mapped.code, res.status);
       }
 
@@ -357,7 +393,7 @@ Evaluate the attempt rigorously according to the instructions.`;
       });
 
       if (!res.ok) {
-        const mapped = mapGeminiStatusToCode(res.status);
+        const mapped = await parseGeminiError(res);
         return buildErrorResponse(mapped.message, mapped.code, res.status);
       }
 

@@ -24,30 +24,70 @@ export async function invokeAiCoach<T>(request: AICoachRequest): Promise<T> {
     });
 
     if (error) {
+      let message = '';
+      let code = 'FUNCTION_INVOCATION_ERROR';
+      let httpStatus: number | undefined;
+
+      // Extract response context from FunctionsHttpError if available
+      if ('context' in error && error.context) {
+        const ctx = error.context as Response;
+        httpStatus = ctx.status;
+        try {
+          const body = await ctx.clone().json();
+          if (body) {
+            if (typeof body.error === 'string') {
+              message = body.error;
+            } else if (body.error && typeof body.error === 'object') {
+              message = (body.error as { message?: string }).message || (body.error as { code?: string }).code || '';
+              code = (body.error as { code?: string }).code || code;
+            }
+            if (body.code) {
+              code = body.code;
+            }
+          }
+        } catch {
+          try {
+            const rawText = await ctx.clone().text();
+            if (rawText && rawText.length < 300) {
+              message = rawText;
+            }
+          } catch {
+            // ignore
+          }
+        }
+      }
+
       // Map Supabase gateway / invocation errors to clear, safe user messages
-      const status = (error as unknown as { status?: number })?.status;
-      if (status === 401) {
+      if (httpStatus === 401 || code === 'UNAUTHORIZED') {
         throw new GeminiServiceError(
-          'Your session has expired. Please sign in again to use AI Coaching.',
+          message || 'Your session has expired. Please sign in again to use AI Coaching.',
           'UNAUTHORIZED'
         );
       }
-      if (status === 404) {
+      if (httpStatus === 404 || code === 'SERVICE_UNAVAILABLE') {
         throw new GeminiServiceError(
-          'AI Coach service is currently being updated. Please try again shortly.',
+          message || 'AI Coach service is currently being updated. Please try again shortly.',
           'SERVICE_UNAVAILABLE'
         );
       }
 
       throw new GeminiServiceError(
-        error.message || 'Failed to communicate with AI Coach service.',
-        'FUNCTION_INVOCATION_ERROR'
+        message || error.message || 'Failed to communicate with AI Coach service.',
+        code
       );
     }
 
     if (!data || !data.success) {
-      const code = data?.code || 'AI_SERVICE_ERROR';
-      const message = data?.error || 'AI Coach service returned an error.';
+      let code = data?.code || 'AI_SERVICE_ERROR';
+      let message = 'AI Coach service returned an error.';
+
+      if (typeof data?.error === 'string') {
+        message = data.error;
+      } else if (data?.error && typeof data.error === 'object') {
+        message = (data.error as { message?: string }).message || message;
+        code = (data.error as { code?: string }).code || code;
+      }
+
       throw new GeminiServiceError(message, code);
     }
 
@@ -60,3 +100,4 @@ export async function invokeAiCoach<T>(request: AICoachRequest): Promise<T> {
     throw new GeminiServiceError(message, 'UNEXPECTED_ERROR');
   }
 }
+

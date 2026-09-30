@@ -3,8 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
 // Authoritative project defaults from project configuration
-const DEFAULT_SUPABASE_URL = 'https://jopgfbnlhjpjbtnhapev.supabase.co';
-const DEFAULT_SUPABASE_PUBLISHABLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvcGdmYm5saGpwamJ0bmhhcGV2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY3NDg2NDksImV4cCI6MjA4MjMyNDY0OX0.xElF3CIwCrtHD6lnHsqnPSm591FOMkghnFuQ4V_wWrk';
+const DEFAULT_SUPABASE_URL = 'https://omazwpvkdqtsiakeulru.supabase.co';
+const DEFAULT_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_O6Qp_VU1ioECtOXRR-Z8GQ_OCyLV_o3';
 
 // Safe environment resolution for Vite and test runners
 const env = typeof import.meta !== 'undefined' && import.meta.env

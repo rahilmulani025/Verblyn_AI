@@ -5,6 +5,8 @@
 -- audited SECURITY DEFINER functions.
 -- ============================================================================
 
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS xp INTEGER DEFAULT 0;
+
 -- 1. HELPER: ATOMIC USER SKILL UPDATE (BASELINE IMMUTABILITY & MULTI-SESSION TREND)
 CREATE OR REPLACE FUNCTION public.update_user_skill_atomic(
     p_user_id UUID,
@@ -380,7 +382,7 @@ BEGIN
     -- Sync legacy profile XP and user_progress for secondary compatibility
     UPDATE public.profiles
     SET xp = v_total_xp_sum
-    WHERE id = v_user_id;
+    WHERE user_id = v_user_id;
 
     UPDATE public.user_progress
     SET 

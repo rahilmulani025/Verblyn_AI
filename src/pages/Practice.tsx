@@ -45,15 +45,18 @@ export const Practice: React.FC = () => {
   const candidateIndexRef = useRef<number>(0);
 
   // User context refs for AI generation
-  const profileRef = useRef<any>(null);
-  const progressRef = useRef<any>(null);
+  const profileRef = useRef<{ primaryGoal?: string } | null>(null);
+  const progressRef = useRef<{
+    activeWeaknesses?: Array<{ type: string }>;
+    skills?: Array<{ skillName: string; currentScore: number }>;
+  } | null>(null);
 
   const generateAiTopic = useCallback(async (apiKey: string) => {
     setIsGeneratingAi(true);
     try {
       const activeWeakness = progressRef.current?.activeWeaknesses?.[0]?.type || 'Filler words';
       const weakestSkill = progressRef.current?.skills
-        ? [...progressRef.current.skills].sort((a: any, b: any) => a.currentScore - b.currentScore)[0]?.skillName
+        ? [...progressRef.current.skills].sort((a, b) => a.currentScore - b.currentScore)[0]?.skillName
         : 'Fluency';
 
       const generated = await geminiApi.generateTopic(apiKey, {

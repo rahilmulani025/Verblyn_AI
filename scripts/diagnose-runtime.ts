@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
-const url = 'https://jopgfbnlhjpjbtnhapev.supabase.co';
-const key = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvcGdmYm5saGpwamJ0bmhhcGV2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY3NDg2NDksImV4cCI6MjA4MjMyNDY0OX0.xElF3CIwCrtHD6lnHsqnPSm591FOMkghnFuQ4V_wWrk';
+const url = 'https://omazwpvkdqtsiakeulru.supabase.co';
+const key = 'sb_publishable_O6Qp_VU1ioECtOXRR-Z8GQ_OCyLV_o3';
 
 const sb = createClient(url, key, {
   auth: {
@@ -25,8 +25,6 @@ async function main() {
     'attempt_analysis',
     'speech_metrics',
     'user_weaknesses',
-    'learning_plans',
-    'learning_plan_days',
     'xp_events',
     'levels',
     'achievements',

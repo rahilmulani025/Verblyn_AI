@@ -140,6 +140,7 @@ export interface AICoachResponse<T = unknown> {
   success: boolean;
   action: AICoachAction;
   data?: T;
-  error?: string;
+  error?: string | { code?: string; message?: string };
   code?: string;
 }
+

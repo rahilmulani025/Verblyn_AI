@@ -4,6 +4,8 @@
 -- hybrid scoring, and atomic server progression.
 -- ============================================================================
 
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS xp INTEGER DEFAULT 0;
+
 -- 1. EXTEND USER_WEAKNESSES FOR OCCURRENCE TRACKING & STATUS
 ALTER TABLE public.user_weaknesses 
     ADD COLUMN IF NOT EXISTS weakness_type TEXT,
@@ -342,7 +344,7 @@ BEGIN
     -- Sync legacy profile XP and user_progress for secondary compatibility
     UPDATE public.profiles
     SET xp = v_total_xp_sum
-    WHERE id = v_user_id;
+    WHERE user_id = v_user_id;
 
     UPDATE public.user_progress
     SET 
