@@ -47,7 +47,7 @@ interface RequestBody {
   payload?: GenerateTopicPayload | AnalyzeAttemptPayload | Record<string, unknown>;
 }
 
-const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-1.5-flash";
 
 function buildSuccessResponse(action: string, data: unknown) {
   return new Response(
