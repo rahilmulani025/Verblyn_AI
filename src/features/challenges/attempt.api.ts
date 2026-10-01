@@ -805,9 +805,11 @@ export const attemptApi = {
         )
         .filter(Boolean);
 
-      const isInvalid = scores.overallScore === 0 || (whatYouDidWell.length === 0 && (attemptRow.transcript || '').trim().split(/\s+/).length < 5);
+      const transcriptText = (attemptRow.transcript || '').trim();
+      const validity = evaluateAttemptValidity(transcriptText);
+      const isInvalid = validity.validity === 'INVALID' && scores.overallScore === 0;
       const isValidAttempt = !isInvalid;
-      const evaluationValidity = isInvalid ? 'INVALID' : (scores.overallScore < 60 ? 'PARTIAL' : 'VALID');
+      const evaluationValidity = isInvalid ? 'INVALID' : (validity.validity === 'PARTIAL' || scores.overallScore < 60 ? 'PARTIAL' : 'VALID');
 
       const weaknessCandidates = Array.isArray(analysisRow?.weakness_candidates)
         ? (analysisRow.weakness_candidates as unknown as WeaknessCandidate[])

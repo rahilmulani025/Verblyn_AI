@@ -377,14 +377,23 @@ Generate exactly ONE tailored speaking drill adhering strictly to this training 
 
 MANDATORY EVALUATION PRINCIPLES:
 1. THREE-TIER VALIDITY CLASSIFICATION:
-   - "INVALID": If the speech is empty, silence, greeting-only (e.g. "hello", "hi", "testing 1 2 3"), filler-only ("um um uh"), repetitive single-word noise, or completely fails to answer the challenge prompt.
-     * For INVALID attempts: "overall_score" MUST be 0. "task_completion.score" MUST be 0. "task_completion.completed" MUST be false. "evaluation_validity" MUST be "INVALID". "is_valid_attempt" MUST be false. "strengths" MUST be an empty array []. DO NOT invent fake praise or award points for speaking greetings.
-   - "PARTIAL": If the user attempts the question but gives an extremely brief, vague, or incomplete answer (e.g., "I worked on a website project. It was good.").
-     * "task_completion.score" should be 20-45. "overall_score" MUST be capped at 50 max.
-   - "VALID": If the user delivers a meaningful, substantive response addressing the prompt.
+   - "INVALID" (Non-Answer / Noise Only): If the speech is completely empty, silence, greeting-only (e.g. "hello", "hi", "testing 1 2 3"), filler-only ("um um uh"), or repetitive single-word noise.
+     * For INVALID attempts: "overall_score" MUST be 0. "task_completion.score" MUST be 0. "task_completion.completed" MUST be false. "evaluation_validity" MUST be "INVALID". "is_valid_attempt" MUST be false. "strengths" MUST be an empty array [].
+   - "PARTIAL" (Short or Incomplete or Off-Topic):
+     * If the user attempts the question but gives a brief, concise, or incomplete answer (e.g., "I built a Power BI dashboard for sales analysis", "I worked on a website project", "I used Python"):
+       - This IS a real speech attempt and MUST NOT be classified as "INVALID" or "no speech recorded".
+       - Evaluate measurable skills (vocabulary, clarity, grammar) honestly.
+       - "task_completion.score" should be 30-65 depending on depth. "evaluation_validity" MUST be "PARTIAL". "is_valid_attempt" MUST be true.
+     * If the user spoke real English sentences but on an unrelated/off-topic subject (e.g., talking about sports/movies when asked about a project):
+       - DO NOT call it "no speech recorded" or "INVALID". Set "evaluation_validity" to "PARTIAL".
+       - "task_completion.score" should be 15-25. "overall_score" MUST be capped at 25-35. "is_valid_attempt" MUST be true.
+       - Explicitly explain the topic mismatch in "improvements" and "coach_summary".
+   - "VALID" (Substantive Relevant Answer):
+     * If the user delivers a meaningful, substantive response addressing the prompt.
+     * "task_completion.score" should be 70-100. "evaluation_validity" MUST be "VALID". "is_valid_attempt" MUST be true.
 2. TASK COMPLETION GATING (CRITICAL):
    - First determine: "DID THE USER ACTUALLY ANSWER THE QUESTION?"
-   - NEVER award a high score to an answer merely because the transcript contains fluent or grammatical English. Fluent off-topic speech is an UNSUCCESSFUL answer (overall_score <= 30).
+   - NEVER award a high score to an answer merely because the transcript contains fluent or grammatical English. Fluent off-topic speech is an UNSUCCESSFUL answer (overall_score <= 35).
    - "task_completion.score" is the master gating factor for "overall_score".
 3. STRICT EVIDENCE REQUIREMENT (NO FAKE PRAISE):
    - DO NOT give automatic praise or generic flattery (e.g. "Great confidence", "Nice flow").

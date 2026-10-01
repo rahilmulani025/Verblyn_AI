@@ -265,19 +265,21 @@ export const ChallengeDetailPage: React.FC = () => {
       if (validityCheck.validity === 'INVALID') {
         aiAnalysis = createInvalidAnalysisResult(validityCheck, challenge, authoritativeTranscript);
       } else if (aiAnalysis) {
-        // Enforce task completion gating against hallucinated high scores on off-topic responses
-        const tcScore = aiAnalysis.task_completion?.score ?? 70;
-        if (tcScore < 30 || !aiAnalysis.task_completion?.completed) {
-          if (tcScore < 30) {
-            aiAnalysis.overall_score = Math.min(aiAnalysis.overall_score, Math.round(tcScore * 1.2));
-            aiAnalysis.is_valid_attempt = false;
-            aiAnalysis.evaluation_validity = 'INVALID';
-            aiAnalysis.strengths = []; // Zero fake praise
-          }
-        } else if (tcScore < 50) {
-          aiAnalysis.overall_score = Math.min(aiAnalysis.overall_score, Math.round(tcScore * 0.6 + 20));
-          aiAnalysis.evaluation_validity = 'PARTIAL';
-        }
+        // Enforce task completion gating and normalize with validateAIAnalysisResult
+        aiAnalysis = validateAIAnalysisResult(aiAnalysis, authoritativeTranscript, challenge.prompt);
+      }
+
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[Verblyn Evaluation Pipeline Diagnostic]', {
+          challengeId: challenge.id,
+          durationSeconds: elapsed,
+          rawWordCount: authoritativeTranscript.split(/\s+/).filter(Boolean).length,
+          validity: validityCheck.validity,
+          reasonCode: validityCheck.reasonCode,
+          overallScore: aiAnalysis?.overall_score,
+          taskCompletionScore: aiAnalysis?.task_completion?.score,
+          evaluationValidity: aiAnalysis?.evaluation_validity,
+        });
       }
 
       const attemptResult = await attemptApi.submitChallengeAttempt({

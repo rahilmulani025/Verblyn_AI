@@ -1,12 +1,13 @@
 /**
- * VERBLYN PRODUCTION EVALUATION QUALITY VERIFICATION SUITE
+ * VERBLYN PRODUCTION EVALUATION QUALITY & VALIDITY REGRESSION SUITE
  *
  * Verifies that the evaluation pipeline:
- * 1. Deterministically rejects non-answers (empty, silence, "hello hello", fillers, single words).
- * 2. Gates task completion independently from grammar/fluency.
- * 3. Handles partial vs valid vs concise vs strong answers honestly.
- * 4. Strictly protects progression (no unearned XP, no skill inflation).
- * 5. Adapts intelligently toward recovery rather than false advancement.
+ * 1. Deterministically rejects true non-answers (empty, silence, "hello hello", fillers, single words).
+ * 2. Does NOT misclassify short meaningful answers as "no speech recorded".
+ * 3. Correctly handles off-topic speech (caps score without claiming no speech).
+ * 4. Gates task completion independently from grammar/fluency.
+ * 5. Handles partial vs valid vs concise vs strong answers honestly.
+ * 6. Strictly protects progression (no unearned XP, no skill inflation for invalid attempts).
  */
 
 import {
@@ -48,7 +49,7 @@ const mockProjectChallenge: Challenge = {
   xpReward: 30,
   prompt: 'Walk through a recent technical or business project you completed. Explain your role and outcome.',
   frameworkHint: 'Use Situation-Task-Action-Result (STAR).',
-  expectedTopics: ['project', 'dashboard', 'python', 'analytics', 'team', 'outcome', 'result', 'website', 'internship'],
+  expectedTopics: ['project', 'dashboard', 'python', 'analytics', 'team', 'outcome', 'result', 'website', 'internship', 'sql', 'sales'],
   rubric: {
     fluency: 'Steady pace',
     clarity: 'Clear structure',
@@ -74,141 +75,174 @@ const mockMetrics: SpeechMetricsSummary = {
 };
 
 // ==========================================
-// TEST 1: Empty Transcript
+// CASE 1: Empty Transcript ("")
 // ==========================================
-console.log('\nTest Case 1: Empty Transcript ("")');
+console.log('\nCASE 1: Empty Transcript ("")');
 const resEmpty = evaluateAttemptValidity('', 0, mockProjectChallenge.prompt);
 assert(resEmpty.validity === 'INVALID', 'Empty transcript classified as INVALID');
 assert(resEmpty.isValid === false, 'isValid is false for empty transcript');
-assert(resEmpty.totalWordCount === 0, 'Word count is 0 for empty transcript');
+assert(resEmpty.reasonCode === 'empty_transcript', 'Reason code is empty_transcript');
 
-const mockEmptyMetrics: SpeechMetricsSummary = { ...mockMetrics, wordCount: 0, totalWords: 0, wpm: 0 };
-const evalEmpty = attemptApi.evaluateChallengeMetrics(mockProjectChallenge, mockEmptyMetrics, '');
+const evalEmpty = attemptApi.evaluateChallengeMetrics(mockProjectChallenge, { ...mockMetrics, wordCount: 0 }, '');
 assert(evalEmpty.scores.overallScore === 0, 'Deterministic overallScore is 0 for empty transcript');
 assert(evalEmpty.whatYouDidWell.length === 0, 'No fake strengths generated for empty transcript');
-assert(evalEmpty.isValidAttempt === false, 'Deterministic isValidAttempt is false');
+assert(evalEmpty.isValidAttempt === false, 'isValidAttempt is false');
 
 // ==========================================
-// TEST 2: Greeting Only ("hello hello")
+// CASE 2: Greeting Only ("hello hello")
 // ==========================================
-console.log('\nTest Case 2: Greeting Only ("hello hello")');
+console.log('\nCASE 2: Greeting Only ("hello hello")');
 const resGreeting = evaluateAttemptValidity('hello hello', 2, mockProjectChallenge.prompt);
 assert(resGreeting.validity === 'INVALID', '"hello hello" classified as INVALID');
+assert(resGreeting.isValid === false, 'isValid is false for greeting only');
 assert(resGreeting.reasonCode === 'greeting_only' || resGreeting.reasonCode === 'repetitive_noise', 'Greeting reason code identified');
-assert(resGreeting.explanation.toLowerCase().includes('greeting') || resGreeting.explanation.toLowerCase().includes('speech'), 'Explicit explanation provided for greeting');
 
 const evalGreeting = attemptApi.evaluateChallengeMetrics(mockProjectChallenge, { ...mockMetrics, wordCount: 2 }, 'hello hello');
 assert(evalGreeting.scores.overallScore === 0, 'Overall score is 0 for "hello hello"');
 assert(evalGreeting.whatYouDidWell.length === 0, 'No strengths awarded for greeting');
-assert(evalGreeting.improveNext.length > 0, 'Actionable guidance provided for greeting');
+assert(evalGreeting.isValidAttempt === false, 'isValidAttempt is false for greeting');
 
 // ==========================================
-// TEST 3: Single Word ("hi")
+// CASE 3: Single Word ("hi")
 // ==========================================
-console.log('\nTest Case 3: Single Word ("hi")');
+console.log('\nCASE 3: Single Word ("hi")');
 const resHi = evaluateAttemptValidity('hi', 1, mockProjectChallenge.prompt);
 assert(resHi.validity === 'INVALID', '"hi" classified as INVALID');
-assert(resHi.totalWordCount === 1, 'Word count accurately counted as 1');
+assert(resHi.isValid === false, 'isValid is false for "hi"');
 
 // ==========================================
-// TEST 4: Filler Only ("um um uh")
+// CASE 4: Filler Only ("um um uh")
 // ==========================================
-console.log('\nTest Case 4: Filler Only ("um um uh")');
+console.log('\nCASE 4: Filler Only ("um um uh")');
 const resFiller = evaluateAttemptValidity('um um uh', 3, mockProjectChallenge.prompt);
 assert(resFiller.validity === 'INVALID', '"um um uh" classified as INVALID');
-assert(resFiller.reasonCode === 'filler_only', 'Identified reasonCode as filler_only');
+assert(resFiller.isValid === false, 'isValid is false for "um um uh"');
+assert(resFiller.reasonCode === 'filler_only', 'Reason code is filler_only');
 
 // ==========================================
-// TEST 5: Off-topic ("Hello, I am Rahil and I like technology")
+// CASE 5: "I built a Power BI dashboard."
 // ==========================================
-console.log('\nTest Case 5: Off-topic Response & Task Completion Gating');
-const offTopicTranscript = 'Hello, I am Rahil and I like technology.';
+console.log('\nCASE 5: "I built a Power BI dashboard."');
+const resCase5 = evaluateAttemptValidity('I built a Power BI dashboard.', 4, mockProjectChallenge.prompt);
+assert(resCase5.validity !== 'INVALID', '"I built a Power BI dashboard." is NOT INVALID');
+assert(resCase5.isValid === true, 'isValid is true for "I built a Power BI dashboard."');
+assert(resCase5.reasonCode !== 'empty_transcript', 'NOT classified as empty_transcript');
 
-// If Gemini returns high score on off-topic response, normalize it with validateAIAnalysisResult
-const rawGeminiHallucination: AIAnalysisResult = {
-  overall_score: 88,
+const evalCase5 = attemptApi.evaluateChallengeMetrics(mockProjectChallenge, { ...mockMetrics, wordCount: 6 }, 'I built a Power BI dashboard.');
+assert(evalCase5.scores.overallScore > 0, 'Receives real evaluation score > 0');
+assert(evalCase5.isValidAttempt === true, 'isValidAttempt is true');
+
+// ==========================================
+// CASE 6: "I used Python."
+// ==========================================
+console.log('\nCASE 6: "I used Python."');
+const resCase6 = evaluateAttemptValidity('I used Python.', 2, mockProjectChallenge.prompt);
+assert(resCase6.validity !== 'INVALID', '"I used Python." is NOT INVALID');
+assert(resCase6.isValid === true, 'isValid is true for "I used Python."');
+assert(resCase6.reasonCode === 'partial_incomplete', 'Reason code is partial_incomplete');
+
+const evalCase6 = attemptApi.evaluateChallengeMetrics(mockProjectChallenge, { ...mockMetrics, wordCount: 3 }, 'I used Python.');
+assert(evalCase6.scores.overallScore > 0, 'Score is > 0');
+assert(evalCase6.isValidAttempt === true, 'isValidAttempt is true');
+
+// ==========================================
+// CASE 7: "I built a Power BI dashboard for sales analysis."
+// ==========================================
+console.log('\nCASE 7: "I built a Power BI dashboard for sales analysis."');
+const resCase7 = evaluateAttemptValidity('I built a Power BI dashboard for sales analysis.', 6, mockProjectChallenge.prompt);
+assert(resCase7.validity === 'VALID', 'Classified as VALID concise answer');
+assert(resCase7.isValid === true, 'isValid is true');
+assert(resCase7.reasonCode === 'valid_concise', 'Reason code is valid_concise');
+
+const evalCase7 = attemptApi.evaluateChallengeMetrics(mockProjectChallenge, { ...mockMetrics, wordCount: 9 }, 'I built a Power BI dashboard for sales analysis.');
+assert(evalCase7.scores.overallScore >= 60, 'Score is substantial (>= 60)');
+assert(evalCase7.isValidAttempt === true, 'isValidAttempt is true');
+
+// ==========================================
+// CASE 8: "I worked on a website project."
+// ==========================================
+console.log('\nCASE 8: "I worked on a website project."');
+const resCase8 = evaluateAttemptValidity('I worked on a website project.', 4, mockProjectChallenge.prompt);
+assert(resCase8.validity === 'VALID' || resCase8.validity === 'PARTIAL', 'Classified as VALID or PARTIAL (NOT INVALID)');
+assert(resCase8.isValid === true, 'isValid is true');
+assert(resCase8.reasonCode !== 'empty_transcript', 'Never called empty_transcript');
+
+// ==========================================
+// CASE 9: "I like cricket." (Off-topic speech)
+// ==========================================
+console.log('\nCASE 9: "I like cricket." (Off-topic speech)');
+const resCase9 = evaluateAttemptValidity('I like cricket.', 3, mockProjectChallenge.prompt);
+assert(resCase9.isValid === true, 'Speech IS detected (isValid is true)');
+assert(resCase9.reasonCode !== 'empty_transcript', 'NOT classified as empty_transcript');
+
+// When evaluated by Gemini with low task completion:
+const offTopicAiResult: AIAnalysisResult = {
+  overall_score: 75,
   evaluation_validity: 'valid',
   is_valid_attempt: true,
-  task_completion: { score: 15, completed: false, explanation: 'Did not answer project prompt' },
-  skills: { fluency: 90, clarity: 90, structure: 85, vocabulary: 80, grammar: 90, confidence: 85 },
-  strengths: [{ title: 'Great answer and structure', impact: 'Spoke clearly', evidence: 'Hello I am Rahil' }],
-  improvements: [{ issue_type: 'off_topic', severity: 'high', explanation: 'Did not answer project prompt', action: 'Describe a real project', evidence: 'off topic' }],
-  coach_summary: 'Good English.',
-  next_focus: 'Structure',
+  task_completion: { score: 15, completed: false, explanation: 'Spoke about cricket instead of a project' },
+  skills: { fluency: 80, clarity: 80, structure: 70, vocabulary: 75, grammar: 85, confidence: 80 },
+  strengths: [{ title: 'Spoke clearly', evidence: 'I like cricket', impact: 'Fluent delivery' }],
+  improvements: [],
+  coach_summary: 'You spoke clearly but did not answer the prompt.',
+  next_focus: 'Answer Relevance',
   recommended_drill_type: 'retry',
   confidence_in_evaluation: 0.95,
 };
 
-const gatedAnalysis = validateAIAnalysisResult(rawGeminiHallucination, offTopicTranscript, mockProjectChallenge.prompt);
-assert(gatedAnalysis.overall_score <= 45, 'Task completion gate capped the overall score for off-topic response');
-assert(gatedAnalysis.evaluation_validity === 'INVALID' || gatedAnalysis.evaluation_validity === 'PARTIAL', 'Validity adjusted for off-topic answer');
+const normalizedOffTopic = validateAIAnalysisResult(offTopicAiResult, 'I like cricket.', mockProjectChallenge.prompt);
+assert(normalizedOffTopic.overall_score <= 35, 'Overall score capped at <= 35 for off-topic response');
+assert(normalizedOffTopic.is_valid_attempt === true, 'is_valid_attempt remains true (NOT no-speech)');
+assert(normalizedOffTopic.evaluation_validity === 'PARTIAL', 'evaluation_validity is PARTIAL');
+assert(normalizedOffTopic.strengths.length === 0, 'No strengths awarded for off-topic response');
 
 // ==========================================
-// TEST 6: Partial / Weak Answer ("I worked on a website project. It was good.")
+// CASE 10: Detailed Substantive Answer
 // ==========================================
-console.log('\nTest Case 6: Partial / Weak Answer ("I worked on a website project. It was good.")');
-const partialTranscript = 'I worked on a website project. It was good and I learned a lot.';
-const resPartial = evaluateAttemptValidity(partialTranscript, 8, mockProjectChallenge.prompt);
-assert(resPartial.validity === 'PARTIAL' || resPartial.validity === 'VALID', 'Partial answer classified as PARTIAL or VALID attempt');
-assert(resPartial.isValid === true, 'isValid is true for genuine attempt');
+console.log('\nCASE 10: Detailed Substantive Answer');
+const detailedTranscript = 'I built a data analytics platform using Python and Power BI. I cleaned datasets, created dashboards, and analyzed trends.';
+const resCase10 = evaluateAttemptValidity(detailedTranscript, 18, mockProjectChallenge.prompt);
+assert(resCase10.validity === 'VALID', 'Detailed response classified as VALID');
+assert(resCase10.isValid === true, 'isValid is true');
+assert(resCase10.meaningfulWordCount >= 6, 'Contains 6+ content words');
 
-const evalPartial = attemptApi.evaluateChallengeMetrics(mockProjectChallenge, { ...mockMetrics, wordCount: 13 }, partialTranscript);
-assert(evalPartial.scores.overallScore > 0, 'Partial answer receives measurable score > 0');
-assert(evalPartial.isValidAttempt === true, 'Partial answer is marked valid attempt');
-
-// ==========================================
-// TEST 7: Strong Substantive Answer
-// ==========================================
-console.log('\nTest Case 7: Strong Substantive Answer');
-const strongTranscript = 'I built a data analytics dashboard during my internship. I cleaned the dataset with Python and created Power BI visualizations. The dashboard helped the team identify the highest-performing regions.';
-const resStrong = evaluateAttemptValidity(strongTranscript, 25, mockProjectChallenge.prompt);
-assert(resStrong.validity === 'VALID', 'Substantive answer classified as VALID');
-assert(resStrong.meaningfulWordCount >= 8, 'Substantive answer has high meaningful content count');
-assert(resStrong.isValid === true, 'isValid is true for substantive answer');
-
-const strongAiResult: AIAnalysisResult = {
-  overall_score: 92,
+const detailedAiResult: AIAnalysisResult = {
+  overall_score: 90,
   evaluation_validity: 'valid',
   is_valid_attempt: true,
-  task_completion: { score: 95, completed: true, explanation: 'Fully answered the project prompt with STAR' },
-  skills: { fluency: 92, clarity: 90, structure: 94, vocabulary: 88, grammar: 95, confidence: 90 },
-  strengths: [
-    {
-      title: 'Clear STAR Structure',
-      impact: 'Framed the project challenge, action, and business outcome sequentially.',
-      evidence: 'I built a data analytics dashboard during my internship... The dashboard helped the team identify the highest-performing regions.',
-    },
-  ],
+  task_completion: { score: 92, completed: true, explanation: 'Addressed the project prompt clearly' },
+  skills: { fluency: 90, clarity: 90, structure: 88, vocabulary: 92, grammar: 90, confidence: 90 },
+  strengths: [{ title: 'Structured Tech Stack', evidence: 'I built a data analytics platform using Python and Power BI.', impact: 'Clear technical ownership.' }],
   improvements: [],
-  coach_summary: 'Outstanding structured delivery with concrete metrics and clear project ownership.',
-  next_focus: 'Executive Presence',
+  coach_summary: 'Strong structured answer with concrete technical stack.',
+  next_focus: 'Executive Communication',
   recommended_drill_type: 'advance_level',
   confidence_in_evaluation: 0.98,
 };
 
-const validatedStrong = validateAIAnalysisResult(strongAiResult, strongTranscript, mockProjectChallenge.prompt);
-assert(validatedStrong.overall_score >= 88, 'Strong answer retains high earned score');
-assert(validatedStrong.strengths.length > 0, 'Strengths retained with concrete evidence');
+const normalizedDetailed = validateAIAnalysisResult(detailedAiResult, detailedTranscript, mockProjectChallenge.prompt);
+assert(normalizedDetailed.overall_score >= 88, 'Earned high score retained');
+assert(normalizedDetailed.evaluation_validity === 'VALID', 'evaluation_validity is VALID');
+assert(normalizedDetailed.strengths.length > 0, 'Strengths preserved with evidence');
 
 // ==========================================
-// TEST 8: Concise But Relevant Answer (Not penalizing concise speech)
+// CASE 11: "During my internship, I cleaned 30,000 records using Python."
 // ==========================================
-console.log('\nTest Case 8: Concise But Relevant Answer');
-const conciseTranscript = 'During my internship, I cleaned 30,000 records using Python and built a Power BI dashboard.';
-const resConcise = evaluateAttemptValidity(conciseTranscript, 10, mockProjectChallenge.prompt);
-assert(resConcise.validity === 'VALID', 'Short but relevant answer is NOT rejected as invalid');
-assert(resConcise.isValid === true, 'isValid is true for concise relevant response');
+console.log('\nCASE 11: "During my internship, I cleaned 30,000 records using Python."');
+const resCase11 = evaluateAttemptValidity('During my internship, I cleaned 30,000 records using Python.', 8, mockProjectChallenge.prompt);
+assert(resCase11.validity === 'VALID', 'Classified as VALID');
+assert(resCase11.isValid === true, 'isValid is true');
+assert(resCase11.reasonCode !== 'empty_transcript', 'Never labeled no-speech');
 
 // ==========================================
-// TEST 9: Progression Safety on Invalid Attempt
+// CASE 12: Progression Safety on Invalid Attempt
 // ==========================================
-console.log('\nTest Case 9: Progression Safety on Invalid Attempt');
+console.log('\nCASE 12: Progression Safety on Truly Invalid Attempt');
 const invalidResult = createInvalidAnalysisResult(resGreeting, mockProjectChallenge, 'hello hello');
 assert(invalidResult.overall_score === 0, 'Invalid result overall_score is 0');
 assert(invalidResult.skills.fluency === 0, 'Invalid result fluency is 0');
 assert(invalidResult.strengths.length === 0, 'Invalid result strengths is empty array');
 assert(invalidResult.improvements.length > 0, 'Invalid result includes actionable improvement');
-assert(invalidResult.recommended_drill_type === 'retry', 'Invalid result directs to retry');
 
 console.log('\n======================================================');
 console.log(`TOTAL TESTS: ${totalTests} | PASSED: ${passedTests} | FAILED: ${totalTests - passedTests}`);

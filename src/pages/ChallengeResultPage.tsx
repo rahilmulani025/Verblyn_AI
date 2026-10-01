@@ -66,15 +66,20 @@ export const ChallengeResultPage: React.FC = () => {
     );
   }
 
-  const isInvalid = attempt?.evaluationValidity === 'INVALID' || attempt?.isValidAttempt === false || (attempt?.scores?.overallScore === 0);
+  const transcriptText = (attempt?.transcript || '').trim();
+  const rawWords = transcriptText.split(/\s+/).filter(Boolean);
+  const isTrulyNoSpeech = rawWords.length === 0 || transcriptText === '(No speech detected)' || transcriptText === '(No speech recorded)';
+  const isInvalid = String(attempt?.evaluationValidity).toUpperCase() === 'INVALID' || isTrulyNoSpeech;
+  const isPartial = String(attempt?.evaluationValidity).toUpperCase() === 'PARTIAL';
+  const isOffTopic = Boolean(attempt?.coachingImprovements?.some(imp => imp.title.toLowerCase().includes('off topic') || imp.detail.toLowerCase().includes('did not address')));
 
   const scores = attempt?.scores || {
-    overallScore: isInvalid ? 0 : 82,
-    fluency: isInvalid ? 0 : 84,
-    clarity: isInvalid ? 0 : 80,
-    vocabulary: isInvalid ? 0 : 78,
-    grammar: isInvalid ? 0 : 85,
-    confidence: isInvalid ? 0 : 82,
+    overallScore: isInvalid ? 0 : 75,
+    fluency: isInvalid ? 0 : 75,
+    clarity: isInvalid ? 0 : 75,
+    vocabulary: isInvalid ? 0 : 75,
+    grammar: isInvalid ? 0 : 75,
+    confidence: isInvalid ? 0 : 75,
   };
 
   const xpEarned = attempt?.xpEarned || {
@@ -129,9 +134,21 @@ export const ChallengeResultPage: React.FC = () => {
         <div className="space-y-4">
           {/* Top Status Banner */}
           <div className="text-center space-y-1">
-            {isInvalid ? (
+            {isTrulyNoSpeech ? (
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-semibold">
+                <AlertCircle className="w-3.5 h-3.5" /> No Speech Detected
+              </div>
+            ) : isInvalid ? (
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-semibold">
-                <AlertCircle className="w-3.5 h-3.5" /> Question Not Answered / Needs Response
+                <AlertCircle className="w-3.5 h-3.5" /> Question Not Answered / Greeting Detected
+              </div>
+            ) : isOffTopic ? (
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-semibold">
+                <AlertCircle className="w-3.5 h-3.5" /> Off-Topic Response
+              </div>
+            ) : isPartial ? (
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-semibold">
+                <AlertCircle className="w-3.5 h-3.5" /> Short Response / Needs More Detail
               </div>
             ) : (
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold">
@@ -165,7 +182,7 @@ export const ChallengeResultPage: React.FC = () => {
             <CardContent className="p-4 flex items-center justify-between">
               <div>
                 <span className={`text-[11px] font-bold ${isInvalid ? 'text-amber-400' : 'text-primary'} uppercase tracking-wider`}>
-                  {isInvalid ? 'Attempt Status' : 'Overall Score'}
+                  {isTrulyNoSpeech ? 'No Speech' : isInvalid ? 'Non-Answer' : isOffTopic ? 'Topic Mismatch' : isPartial ? 'Short Response' : 'Overall Score'}
                 </span>
                 <div className="flex items-baseline gap-1 mt-0.5">
                   <span className="text-3xl font-extrabold text-foreground tracking-tight">
@@ -174,7 +191,7 @@ export const ChallengeResultPage: React.FC = () => {
                   <span className="text-sm text-muted-foreground">/ 100</span>
                 </div>
                 <span className="text-[10px] text-muted-foreground">
-                  {isInvalid ? 'Evaluation: Not Enough Speech' : `Engine: ${attempt?.analysisVersion || 'ai-v1'}`}
+                  {isTrulyNoSpeech ? 'Evaluation: No Speech Captured' : isInvalid ? 'Evaluation: Greeting / Filler Only' : isOffTopic ? 'Evaluation: Off-Topic Answer' : isPartial ? 'Evaluation: Brief Answer' : `Engine: ${attempt?.analysisVersion || 'ai-v1'}`}
                 </span>
               </div>
 
@@ -211,7 +228,7 @@ export const ChallengeResultPage: React.FC = () => {
             {isInvalid ? (
               <div className="p-3.5 rounded-xl bg-card border border-border/70 text-center space-y-1">
                 <p className="text-xs text-muted-foreground font-medium">
-                  Not enough speech to evaluate vocal skills.
+                  {isTrulyNoSpeech ? 'No speech was recorded to evaluate vocal skills.' : 'Only greetings or filler sounds were detected. Speak in full sentences to evaluate vocal skills.'}
                 </p>
                 <p className="text-[11px] text-muted-foreground/80">
                   Provide a meaningful spoken answer addressing the prompt to calculate metric scores.

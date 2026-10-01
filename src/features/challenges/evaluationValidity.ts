@@ -147,7 +147,6 @@ export function evaluateAttemptValidity(
   const cleanWords = rawWords.map((w) => w.toLowerCase().replace(/[^a-z0-9]/g, '')).filter(Boolean);
   const totalWordCount = cleanWords.length;
 
-  // 2. Extremely short check (< 3 words)
   if (totalWordCount === 0) {
     return {
       validity: 'INVALID',
@@ -188,7 +187,7 @@ export function evaluateAttemptValidity(
     };
   }
 
-  // Check if repetitive single word noise (e.g. "hello hello hello hello", "test test test")
+  // Check if repetitive single word noise (e.g. "hello hello hello hello", "test test test", "yeah yeah yeah")
   if (uniqueWords.size <= 2 && totalWordCount >= 2 && totalWordCount <= 8) {
     const isGreetingNoise = Array.from(uniqueWords).every(
       (w) => GREETINGS_AND_NOISE.has(w) || PURE_FILLERS.has(w)
@@ -198,32 +197,36 @@ export function evaluateAttemptValidity(
         validity: 'INVALID',
         isValid: false,
         reasonCode: 'repetitive_noise',
-        explanation: 'Your response consisted of repeated greetings without an answer.',
+        explanation: 'Your response consisted of repeated greetings or filler sounds without an answer.',
         totalWordCount,
         meaningfulWordCount: 0,
       };
     }
   }
 
-  // Check isolated 1-word non-answers (e.g. "yes", "no", "maybe", "okay")
-  if (totalWordCount === 1) {
+  // Check single-word responses
+  if (totalWordCount <= 1) {
+    const isNoise = cleanWords.every((w) => GREETINGS_AND_NOISE.has(w) || PURE_FILLERS.has(w));
     return {
       validity: 'INVALID',
       isValid: false,
-      reasonCode: 'too_short',
-      explanation: 'A single word is not sufficient to evaluate speaking and communication skills.',
-      totalWordCount: 1,
-      meaningfulWordCount: 0,
+      reasonCode: isNoise ? 'greeting_only' : 'too_short',
+      explanation: isNoise
+        ? 'Only a greeting or non-answer word was detected.'
+        : 'A single word is not sufficient to evaluate speech delivery. Please speak in full sentences.',
+      totalWordCount,
+      meaningfulWordCount: isNoise ? 0 : 1,
     };
   }
 
-  // Count meaningful (substantive) content words
+  // Count meaningful content words (substantive words outside fillers/greetings/common stop-words)
   const meaningfulWords = cleanWords.filter(
     (w) => !COMMON_STOP_WORDS.has(w) && !PURE_FILLERS.has(w) && !GREETINGS_AND_NOISE.has(w)
   );
   const meaningfulWordCount = meaningfulWords.length;
 
-  if (meaningfulWordCount === 0 && totalWordCount <= 6) {
+  // If literally 0 meaningful words across 2-6 words of only stop words (e.g. "it is what it is")
+  if (meaningfulWordCount === 0 && totalWordCount <= 4) {
     return {
       validity: 'INVALID',
       isValid: false,
@@ -234,8 +237,8 @@ export function evaluateAttemptValidity(
     };
   }
 
-  // 3. Partial vs Valid substantive distinction
-  // Short but relevant answers (e.g. "During my internship, I cleaned 30,000 records using Python and built a Power BI dashboard.")
+  // 3. Substantive vs Concise vs Short/Partial distinction
+  // A. Developed Substantive Answer (10+ words with 5+ content words)
   if (totalWordCount >= 10 && meaningfulWordCount >= 5) {
     return {
       validity: 'VALID',
@@ -247,6 +250,7 @@ export function evaluateAttemptValidity(
     };
   }
 
+  // B. Concise Relevant Answer (e.g. "I built a Power BI dashboard for sales analysis." - 9 words, 5 content words)
   if (totalWordCount >= 6 && meaningfulWordCount >= 3) {
     return {
       validity: 'VALID',
@@ -258,19 +262,20 @@ export function evaluateAttemptValidity(
     };
   }
 
-  // 4. Very brief attempts (3-5 words with 1-2 content words) -> PARTIAL
+  // C. Meaningful Short Answer (e.g. "I built a Power BI dashboard.", "I used Python.", "I worked on a website.")
+  // MUST NOT be classified as INVALID or NO SPEECH.
   return {
     validity: 'PARTIAL',
     isValid: true,
     reasonCode: 'partial_incomplete',
-    explanation: 'Response attempted the question but is very brief and lacks structural depth.',
+    explanation: 'Response was recorded and attempted, but is brief and lacks structural depth.',
     totalWordCount,
     meaningfulWordCount,
   };
 }
 
 /**
- * Produces an honest, deterministic low-score analysis result for invalid attempts.
+ * Produces an honest, deterministic low-score analysis result for truly invalid attempts (no speech, greetings only).
  * Zero fake strengths, zero high scores, clear constructive instruction.
  */
 export function createInvalidAnalysisResult(
@@ -278,6 +283,8 @@ export function createInvalidAnalysisResult(
   challenge: Challenge,
   rawTranscript: string = ''
 ): AIAnalysisResult {
+  const isNoSpeech = !rawTranscript || rawTranscript.trim().length === 0;
+
   return {
     transcription: rawTranscript || undefined,
     overall_score: 0,
@@ -286,7 +293,7 @@ export function createInvalidAnalysisResult(
     task_completion: {
       score: 0,
       completed: false,
-      explanation: validityResult.explanation || 'The response did not provide a meaningful answer to the challenge.',
+      explanation: validityResult.explanation || (isNoSpeech ? 'No speech was detected in the recording.' : 'The response did not provide a meaningful answer to the challenge.'),
     },
     skills: {
       fluency: 0,
@@ -299,14 +306,16 @@ export function createInvalidAnalysisResult(
     strengths: [], // Zero fake praise
     improvements: [
       {
-        issue_type: 'incomplete_response',
+        issue_type: isNoSpeech ? 'no_meaningful_answer' : 'incomplete_response',
         severity: 'high',
-        evidence: rawTranscript || '(No speech recorded)',
-        explanation: validityResult.explanation || 'No substantive answer was provided to the challenge prompt.',
+        evidence: rawTranscript || '(No speech detected)',
+        explanation: validityResult.explanation || (isNoSpeech ? 'No audible speech was captured.' : 'Only greetings or brief non-answer sounds were detected.'),
         action: `Answer the prompt directly: "${challenge.prompt}". State what happened, what action you took, and the outcome.`,
       },
     ],
-    coach_summary: `You did not provide a meaningful answer to the challenge "${challenge.title}". Speak clearly and provide at least 1-2 specific details or examples so we can evaluate your communication skills.`,
+    coach_summary: isNoSpeech
+      ? `No speech was captured for "${challenge.title}". Please check your microphone and speak clearly.`
+      : `You did not provide a meaningful answer to the challenge "${challenge.title}". Answer the question directly with at least 1-2 specific details so we can evaluate your communication skills.`,
     next_focus: 'Answer Relevance & Completion',
     recommended_drill_type: 'retry',
     recommendation_reason: 'Practice answering the prompt directly before moving to advanced speech delivery.',
@@ -316,9 +325,10 @@ export function createInvalidAnalysisResult(
 
 /**
  * Post-processes and normalizes Gemini AI analysis output:
- * - Enforces Task Completion gating: if task_completion score is low (e.g. < 40), caps the overall score.
- * - Prevents fake strengths when the attempt was off-topic or invalid.
- * - Ensures scores are within [0, 100].
+ * - Genuinely invalid attempts (empty/greetings) receive 0 score.
+ * - Meaningful short/partial attempts receive real evaluation scores.
+ * - Off-topic attempts have overall_score capped at 25-35 without being falsely labeled as "no speech".
+ * - Ensures scores are bounded within [0, 100].
  */
 export function validateAIAnalysisResult(
   rawResult: AIAnalysisResult,
@@ -328,6 +338,7 @@ export function validateAIAnalysisResult(
   const result = { ...rawResult };
   const validity = evaluateAttemptValidity(transcript);
 
+  // If deterministic gate identified truly INVALID (empty, greeting-only, filler-only)
   if (!validity.isValid || validity.validity === 'INVALID') {
     return {
       ...result,
@@ -346,17 +357,30 @@ export function validateAIAnalysisResult(
     };
   }
 
-  const taskScore = result.task_completion?.score ?? (result.task_completion?.completed ? 80 : 30);
-  
-  if (taskScore < 40) {
-    // Task completion gate: If the user did not answer the prompt, overall score cannot exceed 45
-    result.overall_score = Math.min(result.overall_score, 45);
-    result.evaluation_validity = result.overall_score < 30 ? 'INVALID' : 'PARTIAL';
-    result.is_valid_attempt = result.evaluation_validity !== 'INVALID';
-    // Remove strengths that claim high task achievement
-    result.strengths = (result.strengths || []).filter(
-      (s) => !s.title.toLowerCase().includes('great answer') && !s.title.toLowerCase().includes('complete response')
-    );
+  // The user provided real speech
+  result.is_valid_attempt = true;
+  const taskScore = result.task_completion?.score ?? 50;
+
+  // Off-topic response gating (e.g. speaking about sports for a technical challenge)
+  if (taskScore < 30) {
+    result.overall_score = Math.min(result.overall_score, Math.max(15, Math.round(taskScore * 1.1)));
+    result.evaluation_validity = 'PARTIAL';
+    result.strengths = []; // No fake praise on off-topic responses
+
+    if (!result.improvements.some((imp) => imp.issue_type === 'off_topic' || imp.issue_type === 'no_meaningful_answer')) {
+      result.improvements.unshift({
+        issue_type: 'off_topic',
+        severity: 'high',
+        evidence: transcript.length > 60 ? transcript.slice(0, 57) + '...' : transcript,
+        explanation: 'Your response was recorded, but it did not address the requested challenge topic.',
+        action: 'Focus on answering the specific question asked in the prompt.',
+      });
+    }
+  } else if (taskScore < 55) {
+    result.overall_score = Math.min(result.overall_score, Math.round(taskScore * 0.7 + 25));
+    result.evaluation_validity = 'PARTIAL';
+  } else {
+    result.evaluation_validity = 'VALID';
   }
 
   return result;
