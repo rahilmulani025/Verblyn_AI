@@ -66,33 +66,37 @@ export const ChallengeResultPage: React.FC = () => {
     );
   }
 
+  const isInvalid = attempt?.evaluationValidity === 'INVALID' || attempt?.isValidAttempt === false || (attempt?.scores?.overallScore === 0);
+
   const scores = attempt?.scores || {
-    overallScore: 82,
-    fluency: 84,
-    clarity: 80,
-    vocabulary: 78,
-    grammar: 85,
-    confidence: 82,
+    overallScore: isInvalid ? 0 : 82,
+    fluency: isInvalid ? 0 : 84,
+    clarity: isInvalid ? 0 : 80,
+    vocabulary: isInvalid ? 0 : 78,
+    grammar: isInvalid ? 0 : 85,
+    confidence: isInvalid ? 0 : 82,
   };
 
   const xpEarned = attempt?.xpEarned || {
-    base: challenge?.xpReward || 30,
-    dailyBonus: attempt?.isDailyMission ? 20 : 0,
+    base: isInvalid ? 0 : (challenge?.xpReward || 30),
+    dailyBonus: (isInvalid || !attempt?.isDailyMission) ? 0 : 20,
     weaknessBonus: 0,
     personalBestBonus: 0,
-    total: (challenge?.xpReward || 30) + (attempt?.isDailyMission ? 20 : 0),
+    total: isInvalid ? 0 : ((challenge?.xpReward || 30) + (attempt?.isDailyMission ? 20 : 0)),
   };
 
-  const coachingStrengths = attempt?.coachingStrengths || [];
+  const coachingStrengths = isInvalid ? [] : (attempt?.coachingStrengths || []);
   const coachingImprovements = attempt?.coachingImprovements || [];
 
-  const whatYouDidWell = attempt?.whatYouDidWell || [
+  const whatYouDidWell = isInvalid ? [] : (attempt?.whatYouDidWell || [
     'Maintained smooth conversational momentum throughout the drill.',
-  ];
+  ]);
 
-  const improveNext = attempt?.improveNext || [
+  const improveNext = attempt?.improveNext || (isInvalid ? [
+    'Provide a direct, complete response to the challenge topic to receive full vocal evaluation.'
+  ] : [
     'Inhale for 1 second instead of verbal fillers before delivering your next point.',
-  ];
+  ]);
 
   const weaknessCandidate = attempt?.weaknessCandidates && attempt.weaknessCandidates.length > 0
     ? attempt.weaknessCandidates[0]
@@ -120,14 +124,20 @@ export const ChallengeResultPage: React.FC = () => {
   };
 
   return (
-    <AppShell title="Drill Feedback" showNav={false} showHeader={true}>
+    <AppShell title={isInvalid ? "Drill Feedback" : "Performance Breakdown"} showNav={false} showHeader={true}>
       <PageContainer className="flex-1 flex flex-col justify-between py-2 space-y-4">
         <div className="space-y-4">
-          {/* Top Celebration Banner */}
+          {/* Top Status Banner */}
           <div className="text-center space-y-1">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold">
-              <CheckCircle2 className="w-3.5 h-3.5" /> Drill Completed
-            </div>
+            {isInvalid ? (
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-semibold">
+                <AlertCircle className="w-3.5 h-3.5" /> Question Not Answered / Needs Response
+              </div>
+            ) : (
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Drill Completed
+              </div>
+            )}
             <h2 className="text-xl font-bold tracking-tight text-foreground">
               {challenge?.title || 'Performance Breakdown'}
             </h2>
@@ -135,11 +145,11 @@ export const ChallengeResultPage: React.FC = () => {
 
           {/* AI Coach Message Banner */}
           {attempt?.coachMessage && (
-            <Card className="border border-primary/30 bg-primary/5">
+            <Card className={`border ${isInvalid ? 'border-amber-500/30 bg-amber-500/5' : 'border-primary/30 bg-primary/5'}`}>
               <CardContent className="p-3.5 flex items-start gap-2.5">
-                <Bot className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                <Bot className={`w-5 h-5 ${isInvalid ? 'text-amber-400' : 'text-primary'} shrink-0 mt-0.5`} />
                 <div className="space-y-0.5">
-                  <span className="text-[11px] font-bold text-primary uppercase tracking-wider">
+                  <span className={`text-[11px] font-bold ${isInvalid ? 'text-amber-400' : 'text-primary'} uppercase tracking-wider`}>
                     AI Coach Note
                   </span>
                   <p className="text-xs text-foreground font-medium leading-relaxed">
@@ -151,11 +161,11 @@ export const ChallengeResultPage: React.FC = () => {
           )}
 
           {/* XP & Score Card */}
-          <Card className="border border-primary/40 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent">
+          <Card className={`border ${isInvalid ? 'border-amber-500/30 bg-card/80' : 'border-primary/40 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent'}`}>
             <CardContent className="p-4 flex items-center justify-between">
               <div>
-                <span className="text-[11px] font-bold text-primary uppercase tracking-wider">
-                  Overall Score
+                <span className={`text-[11px] font-bold ${isInvalid ? 'text-amber-400' : 'text-primary'} uppercase tracking-wider`}>
+                  {isInvalid ? 'Attempt Status' : 'Overall Score'}
                 </span>
                 <div className="flex items-baseline gap-1 mt-0.5">
                   <span className="text-3xl font-extrabold text-foreground tracking-tight">
@@ -164,20 +174,26 @@ export const ChallengeResultPage: React.FC = () => {
                   <span className="text-sm text-muted-foreground">/ 100</span>
                 </div>
                 <span className="text-[10px] text-muted-foreground">
-                  Engine: {attempt?.analysisVersion || 'ai-v1'}
+                  {isInvalid ? 'Evaluation: Not Enough Speech' : `Engine: ${attempt?.analysisVersion || 'ai-v1'}`}
                 </span>
               </div>
 
               <div className="flex flex-col items-end gap-1.5">
-                <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-400 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30">
-                  <Sparkles className="w-3.5 h-3.5" /> +{xpEarned.total} XP
-                </span>
-                {xpEarned.dailyBonus > 0 && (
+                {isInvalid ? (
+                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-muted-foreground px-3 py-1 rounded-full bg-secondary border border-border">
+                    0 XP Earned
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-400 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30">
+                    <Sparkles className="w-3.5 h-3.5" /> +{xpEarned.total} XP
+                  </span>
+                )}
+                {!isInvalid && xpEarned.dailyBonus > 0 && (
                   <span className="text-[10px] text-amber-300 font-semibold flex items-center gap-1">
                     <Zap className="w-3 h-3 text-amber-400 fill-amber-400" /> +{xpEarned.dailyBonus} Daily Mission Bonus
                   </span>
                 )}
-                {xpEarned.personalBestBonus > 0 && (
+                {!isInvalid && xpEarned.personalBestBonus > 0 && (
                   <span className="text-[10px] text-emerald-300 font-semibold flex items-center gap-1">
                     <Award className="w-3 h-3" /> +{xpEarned.personalBestBonus} Personal Best
                   </span>
@@ -192,49 +208,62 @@ export const ChallengeResultPage: React.FC = () => {
               Vocal Skill Breakdown
             </span>
 
-            <div className="grid grid-cols-2 gap-2">
-              <div className="p-3 rounded-xl bg-card border border-border/70 flex flex-col justify-between">
-                <span className="text-xs text-muted-foreground font-medium">Fluency</span>
-                <div className="flex items-baseline justify-between mt-1">
-                  <span className="text-base font-bold text-foreground">{scores.fluency}%</span>
-                  <span className="text-[10px] text-muted-foreground">Cadence</span>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-xl bg-card border border-border/70 flex flex-col justify-between">
-                <span className="text-xs text-muted-foreground font-medium">Clarity</span>
-                <div className="flex items-baseline justify-between mt-1">
-                  <span className="text-base font-bold text-foreground">{scores.clarity}%</span>
-                  <span className="text-[10px] text-muted-foreground">Structure</span>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-xl bg-card border border-border/70 flex flex-col justify-between">
-                <span className="text-xs text-muted-foreground font-medium">Vocabulary</span>
-                <div className="flex items-baseline justify-between mt-1">
-                  <span className="text-base font-bold text-foreground">{scores.vocabulary}%</span>
-                  <span className="text-[10px] text-muted-foreground">Word Choice</span>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-xl bg-card border border-border/70 flex flex-col justify-between">
-                <span className="text-xs text-muted-foreground font-medium">Grammar</span>
-                <div className="flex items-baseline justify-between mt-1">
-                  <span className="text-base font-bold text-foreground">{scores.grammar}%</span>
-                  <span className="text-[10px] text-muted-foreground">Discipline</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-3 rounded-xl bg-card border border-border/70 flex items-center justify-between">
-              <div className="space-y-0.5">
-                <span className="text-xs text-muted-foreground font-medium">Confidence Delivery</span>
-                <p className="text-[10px] text-muted-foreground">
-                  Assertive language and firm pacing without hesitation sounds.
+            {isInvalid ? (
+              <div className="p-3.5 rounded-xl bg-card border border-border/70 text-center space-y-1">
+                <p className="text-xs text-muted-foreground font-medium">
+                  Not enough speech to evaluate vocal skills.
+                </p>
+                <p className="text-[11px] text-muted-foreground/80">
+                  Provide a meaningful spoken answer addressing the prompt to calculate metric scores.
                 </p>
               </div>
-              <span className="text-base font-bold text-primary">{scores.confidence}%</span>
-            </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="p-3 rounded-xl bg-card border border-border/70 flex flex-col justify-between">
+                    <span className="text-xs text-muted-foreground font-medium">Fluency</span>
+                    <div className="flex items-baseline justify-between mt-1">
+                      <span className="text-base font-bold text-foreground">{scores.fluency}%</span>
+                      <span className="text-[10px] text-muted-foreground">Cadence</span>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-card border border-border/70 flex flex-col justify-between">
+                    <span className="text-xs text-muted-foreground font-medium">Clarity</span>
+                    <div className="flex items-baseline justify-between mt-1">
+                      <span className="text-base font-bold text-foreground">{scores.clarity}%</span>
+                      <span className="text-[10px] text-muted-foreground">Structure</span>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-card border border-border/70 flex flex-col justify-between">
+                    <span className="text-xs text-muted-foreground font-medium">Vocabulary</span>
+                    <div className="flex items-baseline justify-between mt-1">
+                      <span className="text-base font-bold text-foreground">{scores.vocabulary}%</span>
+                      <span className="text-[10px] text-muted-foreground">Word Choice</span>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-card border border-border/70 flex flex-col justify-between">
+                    <span className="text-xs text-muted-foreground font-medium">Grammar</span>
+                    <div className="flex items-baseline justify-between mt-1">
+                      <span className="text-base font-bold text-foreground">{scores.grammar}%</span>
+                      <span className="text-[10px] text-muted-foreground">Discipline</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-card border border-border/70 flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <span className="text-xs text-muted-foreground font-medium">Confidence Delivery</span>
+                    <p className="text-[10px] text-muted-foreground">
+                      Assertive language and firm pacing without hesitation sounds.
+                    </p>
+                  </div>
+                  <span className="text-base font-bold text-primary">{scores.confidence}%</span>
+                </div>
+              </>
+            )}
           </div>
 
           {/* MEASURED SPEECH METRICS (DETERMINISTIC) */}
@@ -275,37 +304,39 @@ export const ChallengeResultPage: React.FC = () => {
           )}
 
           {/* WHAT YOU DID WELL */}
-          <Card className="border border-emerald-500/30 bg-emerald-500/5">
-            <CardContent className="p-3.5 space-y-2">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 uppercase tracking-wider">
-                <Award className="w-4 h-4" />
-                <span>What You Did Well</span>
-              </div>
-              {coachingStrengths.length > 0 ? (
-                <div className="space-y-2">
-                  {coachingStrengths.map((item, idx) => (
-                    <div key={idx} className="space-y-0.5">
-                      <p className="text-xs font-semibold text-emerald-300">{item.title}</p>
-                      <p className="text-xs text-foreground/90 leading-relaxed">{item.detail}</p>
-                    </div>
-                  ))}
+          {!isInvalid && (
+            <Card className="border border-emerald-500/30 bg-emerald-500/5">
+              <CardContent className="p-3.5 space-y-2">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                  <Award className="w-4 h-4" />
+                  <span>What You Did Well</span>
                 </div>
-              ) : (
-                <ul className="text-xs text-foreground space-y-1 pl-4 list-disc font-medium leading-relaxed">
-                  {whatYouDidWell.map((item, idx) => (
-                    <li key={idx}>{item}</li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
+                {coachingStrengths.length > 0 ? (
+                  <div className="space-y-2">
+                    {coachingStrengths.map((item, idx) => (
+                      <div key={idx} className="space-y-0.5">
+                        <p className="text-xs font-semibold text-emerald-300">{item.title}</p>
+                        <p className="text-xs text-foreground/90 leading-relaxed">{item.detail}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <ul className="text-xs text-foreground space-y-1 pl-4 list-disc font-medium leading-relaxed">
+                    {whatYouDidWell.map((item, idx) => (
+                      <li key={idx}>{item}</li>
+                    ))}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* IMPROVE NEXT & CONCRETE ACTIONS */}
           <Card className="border border-amber-500/30 bg-amber-500/5">
             <CardContent className="p-3.5 space-y-2">
               <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400 uppercase tracking-wider">
                 <Target className="w-4 h-4" />
-                <span>What Held You Back & Actionable Fixes</span>
+                <span>{isInvalid ? 'What Happened & What To Do Next' : 'What Held You Back & Actionable Fixes'}</span>
               </div>
               {coachingImprovements.length > 0 ? (
                 <div className="space-y-2.5">
@@ -347,7 +378,7 @@ export const ChallengeResultPage: React.FC = () => {
           )}
 
           {/* IDENTIFIED WEAKNESS (IF DETECTED) */}
-          {weaknessCandidate && (
+          {!isInvalid && weaknessCandidate && (
             <Card className="border border-purple-500/30 bg-purple-500/5">
               <CardContent className="p-3.5 space-y-1.5">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-purple-400 uppercase tracking-wider">
@@ -368,7 +399,7 @@ export const ChallengeResultPage: React.FC = () => {
                 <div className="flex items-center gap-1.5">
                   <Target className="w-4 h-4 text-primary" />
                   <span className="text-[11px] font-bold text-primary uppercase tracking-wider">
-                    Next Focus
+                    {isInvalid ? 'Recommended Drill' : 'Next Focus'}
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -409,28 +440,57 @@ export const ChallengeResultPage: React.FC = () => {
 
         {/* BOTTOM ACTION BUTTONS */}
         <div className="space-y-2 pt-4 mt-auto">
-          <Button
-            onClick={handleNextChallenge}
-            className="w-full min-h-[48px] touch-target text-sm font-semibold gap-2 shadow-md"
-          >
-            Start Next Recommended Drill <ArrowRight className="w-4 h-4" />
-          </Button>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={handleTryAgain}
-              className="flex-1 min-h-[44px] touch-target text-xs gap-1.5"
-            >
-              <RotateCcw className="w-3.5 h-3.5" /> Try Again
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => navigate('/home')}
-              className="flex-1 min-h-[44px] touch-target text-xs gap-1.5"
-            >
-              Return Home
-            </Button>
-          </div>
+          {isInvalid ? (
+            <>
+              <Button
+                onClick={handleTryAgain}
+                className="w-full min-h-[48px] touch-target text-sm font-semibold gap-2 shadow-md"
+              >
+                <RotateCcw className="w-4 h-4" /> Try Again With Complete Answer
+              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={handleNextChallenge}
+                  className="flex-1 min-h-[44px] touch-target text-xs gap-1.5"
+                >
+                  Skip to Next Drill <ArrowRight className="w-3.5 h-3.5" />
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => navigate('/home')}
+                  className="flex-1 min-h-[44px] touch-target text-xs gap-1.5"
+                >
+                  Return Home
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <Button
+                onClick={handleNextChallenge}
+                className="w-full min-h-[48px] touch-target text-sm font-semibold gap-2 shadow-md"
+              >
+                Start Next Recommended Drill <ArrowRight className="w-4 h-4" />
+              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={handleTryAgain}
+                  className="flex-1 min-h-[44px] touch-target text-xs gap-1.5"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" /> Try Again
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => navigate('/home')}
+                  className="flex-1 min-h-[44px] touch-target text-xs gap-1.5"
+                >
+                  Return Home
+                </Button>
+              </div>
+            </>
+          )}
         </div>
       </PageContainer>
     </AppShell>

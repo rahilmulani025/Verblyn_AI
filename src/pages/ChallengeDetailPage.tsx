@@ -28,6 +28,7 @@ import {
 import { useGeminiKey } from '@/context/GeminiKeyContext';
 import { geminiApi } from '@/services/gemini/gemini.api';
 import { AIAnalysisResult } from '@/services/gemini/gemini.types';
+import { evaluateAttemptValidity, createInvalidAnalysisResult } from '@/features/challenges/evaluationValidity';
 
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -207,9 +208,7 @@ export const ChallengeDetailPage: React.FC = () => {
 
     try {
       const elapsed = Math.max(seconds, 5);
-      let authoritativeTranscript =
-        rawLiveTranscript ||
-        `Delivered structured response addressing the prompt: "${challenge.prompt}".`;
+      let authoritativeTranscript = rawLiveTranscript;
       let calculatedMetrics = calculateSpeechMetrics(authoritativeTranscript, elapsed);
 
       let aiAnalysis: AIAnalysisResult | undefined;
@@ -257,6 +256,27 @@ export const ChallengeDetailPage: React.FC = () => {
           if (process.env.NODE_ENV === 'development') {
             console.warn('Gemini evaluation notice (falling back to server analysis):', geminiErr);
           }
+        }
+      }
+
+      // Pre/Post-evaluation Deterministic Validity Gate
+      const validityCheck = evaluateAttemptValidity(authoritativeTranscript, elapsed, challenge.prompt);
+
+      if (validityCheck.validity === 'INVALID') {
+        aiAnalysis = createInvalidAnalysisResult(validityCheck, challenge, authoritativeTranscript);
+      } else if (aiAnalysis) {
+        // Enforce task completion gating against hallucinated high scores on off-topic responses
+        const tcScore = aiAnalysis.task_completion?.score ?? 70;
+        if (tcScore < 30 || !aiAnalysis.task_completion?.completed) {
+          if (tcScore < 30) {
+            aiAnalysis.overall_score = Math.min(aiAnalysis.overall_score, Math.round(tcScore * 1.2));
+            aiAnalysis.is_valid_attempt = false;
+            aiAnalysis.evaluation_validity = 'INVALID';
+            aiAnalysis.strengths = []; // Zero fake praise
+          }
+        } else if (tcScore < 50) {
+          aiAnalysis.overall_score = Math.min(aiAnalysis.overall_score, Math.round(tcScore * 0.6 + 20));
+          aiAnalysis.evaluation_validity = 'PARTIAL';
         }
       }
 

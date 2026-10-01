@@ -118,6 +118,8 @@ export interface NextRecommendation {
   category?: string;
 }
 
+export type EvaluationValidity = 'VALID' | 'PARTIAL' | 'INVALID';
+
 export interface ChallengeAttempt {
   id: string;
   challengeId: string;
@@ -129,6 +131,13 @@ export interface ChallengeAttempt {
   transcript: string;
   metrics?: SpeechMetricsSummary;
   scores?: ChallengeScoreBreakdown;
+  evaluationValidity?: EvaluationValidity;
+  isValidAttempt?: boolean;
+  taskCompletion?: {
+    score: number;
+    completed: boolean;
+    explanation: string;
+  };
   whatYouDidWell: string[];
   improveNext: string[];
   coachingStrengths?: CoachingFeedbackItem[];

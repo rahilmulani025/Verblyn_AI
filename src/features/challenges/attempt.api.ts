@@ -11,6 +11,7 @@ import {
 import { SpeechMetricsSummary } from '@/lib/metrics';
 import { challengeApi } from './challenge.api';
 import { profileApi } from '@/features/profile/profile.api';
+import { evaluateAttemptValidity } from './evaluationValidity';
 
 interface RpcCompletionResult {
   status: string;
@@ -69,16 +70,46 @@ export const attemptApi = {
   },
 
   /**
-   * Challenge-specific deterministic evaluation formula.
+   * Challenge-specific deterministic evaluation formula with pre-validation gating.
    */
   evaluateChallengeMetrics(
     challenge: Challenge,
-    metrics: SpeechMetricsSummary
+    metrics: SpeechMetricsSummary,
+    transcript?: string
   ): {
     scores: ChallengeScoreBreakdown;
     whatYouDidWell: string[];
     improveNext: string[];
+    isValidAttempt: boolean;
+    evaluationValidity: 'VALID' | 'PARTIAL' | 'INVALID';
   } {
+    const rawTranscript = transcript ?? '';
+    const validity = transcript !== undefined
+      ? evaluateAttemptValidity(rawTranscript, metrics.wordCount, challenge.prompt)
+      : (metrics.wordCount >= 6
+          ? { validity: 'VALID' as const, isValid: true, reasonCode: 'valid_substantive' as const, explanation: '', totalWordCount: metrics.wordCount, meaningfulWordCount: Math.round(metrics.wordCount * 0.6) }
+          : { validity: 'INVALID' as const, isValid: false, reasonCode: 'too_short' as const, explanation: 'No audible speech words were detected.', totalWordCount: metrics.wordCount, meaningfulWordCount: 0 });
+
+    if (validity.validity === 'INVALID' || !validity.isValid) {
+      return {
+        scores: {
+          overallScore: 0,
+          fluency: 0,
+          clarity: 0,
+          vocabulary: 0,
+          grammar: 0,
+          confidence: 0,
+        },
+        whatYouDidWell: [],
+        improveNext: [
+          validity.explanation || 'No speech was detected in the recording.',
+          'Answer the question directly with at least 1-2 specific details or examples.',
+        ],
+        isValidAttempt: false,
+        evaluationValidity: 'INVALID',
+      };
+    }
+
     const whatYouDidWell: string[] = [];
     const improveNext: string[] = [];
 
@@ -146,7 +177,11 @@ export const attemptApi = {
       }
     }
 
-    if (whatYouDidWell.length === 0) {
+    if (validity.validity === 'PARTIAL') {
+      improveNext.unshift('Response was concise or partial. Elaborate with a specific example or clear outcome.');
+    }
+
+    if (whatYouDidWell.length === 0 && validity.validity === 'VALID') {
       whatYouDidWell.push('Steady vocal capture with consistent spoken output.');
     }
     if (improveNext.length === 0) {
@@ -168,6 +203,8 @@ export const attemptApi = {
       },
       whatYouDidWell,
       improveNext,
+      isValidAttempt: true,
+      evaluationValidity: validity.validity,
     };
   },
 
@@ -186,7 +223,7 @@ export const attemptApi = {
       const profile = await profileApi.getProfile();
 
       // 1. Evaluate Metrics
-      const evaluation = this.evaluateChallengeMetrics(input.challenge, input.metrics);
+      const evaluation = this.evaluateChallengeMetrics(input.challenge, input.metrics, input.transcript);
 
       // 2. Fetch User Progress for Personal Best check
       const { data: progress } = await supabase
@@ -200,12 +237,6 @@ export const attemptApi = {
         progress?.best_grammar_score || 0,
         progress?.best_vocabulary_score || 0,
         progress?.best_confidence_score || 0
-      );
-
-      const isPersonalBest = evaluation.scores.overallScore > previousBestScore && previousBestScore > 0;
-      const isWeaknessTarget = Boolean(
-        input.challenge.targetWeakness &&
-          profile?.communicationStyleFocus?.includes(input.challenge.targetWeakness)
       );
 
       // Ensure attempt ID exists
@@ -230,14 +261,22 @@ export const attemptApi = {
       // A. If direct Gemini BYOK aiAnalysis was provided by the frontend speaking engine
       if (input.aiAnalysis) {
         const ai = input.aiAnalysis;
+        const isInvalid = ai.evaluation_validity === 'invalid' || ai.is_valid_attempt === false || (typeof ai.overall_score === 'number' && ai.overall_score === 0);
+
         const scores: ChallengeScoreBreakdown = {
-          overallScore: ai.overall_score || 78,
-          fluency: ai.skills?.fluency || 75,
-          clarity: ai.skills?.clarity || 75,
-          vocabulary: ai.skills?.vocabulary || 75,
-          grammar: ai.skills?.grammar || 75,
-          confidence: ai.skills?.confidence || 75,
+          overallScore: typeof ai.overall_score === 'number' ? ai.overall_score : 0,
+          fluency: typeof ai.skills?.fluency === 'number' ? ai.skills.fluency : 0,
+          clarity: typeof ai.skills?.clarity === 'number' ? ai.skills.clarity : 0,
+          vocabulary: typeof ai.skills?.vocabulary === 'number' ? ai.skills.vocabulary : 0,
+          grammar: typeof ai.skills?.grammar === 'number' ? ai.skills.grammar : 0,
+          confidence: typeof ai.skills?.confidence === 'number' ? ai.skills.confidence : 0,
         };
+
+        const isPersonalBest = !isInvalid && scores.overallScore > previousBestScore && previousBestScore > 0;
+        const isWeaknessTarget = !isInvalid && Boolean(
+          input.challenge.targetWeakness &&
+            profile?.communicationStyleFocus?.includes(input.challenge.targetWeakness)
+        );
 
         const rawStrengths = (ai.strengths || []).map((s) => ({
           title: s.title,
@@ -245,8 +284,8 @@ export const attemptApi = {
         }));
 
         const rawImprovements = (ai.improvements || []).map((imp) => ({
-          title: imp.issue_type.replace(/_/g, ' ').toUpperCase(),
-          detail: imp.explanation ? `${imp.evidence}: ${imp.explanation}` : imp.explanation || imp.evidence,
+          title: (imp.issue_type || 'improve_communication').replace(/_/g, ' ').toUpperCase(),
+          detail: imp.explanation ? `${imp.evidence ? imp.evidence + ': ' : ''}${imp.explanation}` : imp.explanation || imp.evidence,
           action: imp.action,
         }));
 
@@ -259,7 +298,7 @@ export const attemptApi = {
             evidence: imp.evidence || imp.explanation,
           }));
 
-        const whatYouDidWell = rawStrengths.map((s) => s.detail).filter(Boolean);
+        const whatYouDidWell = isInvalid ? [] : rawStrengths.map((s) => s.detail).filter(Boolean);
         const improveNext = rawImprovements.map((imp) => imp.action || imp.detail).filter(Boolean);
 
         try {
@@ -275,7 +314,7 @@ export const attemptApi = {
               p_coach_message: ai.coach_summary || `Evaluated by Gemini AI Coach.`,
               p_recommended_focus: ai.next_focus || input.challenge.targetSkill,
               p_analysis_version: 'gemini-3.8-flash-byok',
-              p_is_daily_mission: Boolean(input.isDailyMission),
+              p_is_daily_mission: Boolean(input.isDailyMission) && !isInvalid,
               p_is_weakness: isWeaknessTarget,
               p_is_personal_best: isPersonalBest,
             }
@@ -302,7 +341,7 @@ export const attemptApi = {
             transcript: input.transcript,
             metrics: input.metrics,
             scores,
-            whatYouDidWell: whatYouDidWell.length > 0 ? whatYouDidWell : evaluation.whatYouDidWell,
+            whatYouDidWell: whatYouDidWell.length > 0 ? whatYouDidWell : (isInvalid ? [] : evaluation.whatYouDidWell),
             improveNext: improveNext.length > 0 ? improveNext : evaluation.improveNext,
             coachingStrengths: rawStrengths,
             coachingImprovements: rawImprovements,
@@ -310,15 +349,19 @@ export const attemptApi = {
             recommendedFocus: ai.next_focus,
             weaknessCandidates,
             analysisVersion: 'gemini-3.8-flash-byok',
-            xpEarned: prog?.earned_xp || {
-              base: input.challenge.xpReward || 30,
-              dailyBonus: input.isDailyMission ? 20 : 0,
-              weaknessBonus: isWeaknessTarget ? 10 : 0,
-              personalBestBonus: isPersonalBest ? 15 : 0,
-              total: (input.challenge.xpReward || 30) + (input.isDailyMission ? 20 : 0) + (isPersonalBest ? 15 : 0),
-            },
+            xpEarned: isInvalid
+              ? { base: 0, dailyBonus: 0, weaknessBonus: 0, personalBestBonus: 0, total: 0 }
+              : (prog?.earned_xp || {
+                  base: input.challenge.xpReward || 30,
+                  dailyBonus: input.isDailyMission ? 20 : 0,
+                  weaknessBonus: isWeaknessTarget ? 10 : 0,
+                  personalBestBonus: isPersonalBest ? 15 : 0,
+                  total: (input.challenge.xpReward || 30) + (input.isDailyMission ? 20 : 0) + (isPersonalBest ? 15 : 0),
+                }),
             recommendation,
             isDailyMission: input.isDailyMission,
+            isValidAttempt: !isInvalid,
+            evaluationValidity: isInvalid ? 'INVALID' : ((ai.evaluation_validity?.toUpperCase() as 'VALID' | 'PARTIAL' | 'INVALID') || 'VALID'),
           };
         } catch (rpcErr) {
           console.warn('Direct AI analysis RPC persistence notice:', rpcErr);
@@ -326,27 +369,34 @@ export const attemptApi = {
       }
 
       // B. Invoke Supabase Edge Function: analyze-attempt
+      const isPersonalBest = evaluation.isValidAttempt && evaluation.scores.overallScore > previousBestScore && previousBestScore > 0;
+      const isWeaknessTarget = evaluation.isValidAttempt && Boolean(
+        input.challenge.targetWeakness &&
+          profile?.communicationStyleFocus?.includes(input.challenge.targetWeakness)
+      );
+
       try {
         const { data: edgeData, error: edgeErr } = await supabase.functions.invoke('analyze-attempt', {
           body: {
             attempt_id: attemptId,
-            is_daily_mission: Boolean(input.isDailyMission),
+            is_daily_mission: Boolean(input.isDailyMission) && evaluation.isValidAttempt,
             is_weakness: isWeaknessTarget,
-            is_personal_best: previousBestScore > 0,
+            is_personal_best: isPersonalBest,
           },
         });
 
         if (!edgeErr && edgeData && (edgeData.status === 'COMPLETED' || edgeData.status === 'ALREADY_COMPLETED')) {
           const analysis = edgeData.analysis;
           const prog = edgeData.progression;
+          const isEdgeInvalid = analysis.evaluation_validity === 'invalid' || analysis.overall_score === 0;
 
           const scores: ChallengeScoreBreakdown = {
-            overallScore: analysis.overall_score || 78,
-            fluency: analysis.skills?.fluency || 75,
-            clarity: analysis.skills?.clarity || 75,
-            vocabulary: analysis.skills?.vocabulary || 75,
-            grammar: analysis.skills?.grammar || 75,
-            confidence: analysis.skills?.confidence || 75,
+            overallScore: typeof analysis.overall_score === 'number' ? analysis.overall_score : 0,
+            fluency: typeof analysis.skills?.fluency === 'number' ? analysis.skills.fluency : 0,
+            clarity: typeof analysis.skills?.clarity === 'number' ? analysis.skills.clarity : 0,
+            vocabulary: typeof analysis.skills?.vocabulary === 'number' ? analysis.skills.vocabulary : 0,
+            grammar: typeof analysis.skills?.grammar === 'number' ? analysis.skills.grammar : 0,
+            confidence: typeof analysis.skills?.confidence === 'number' ? analysis.skills.confidence : 0,
           };
 
           const rawStrengths = Array.isArray(analysis.strengths) ? analysis.strengths : [];
@@ -393,7 +443,7 @@ export const attemptApi = {
             transcript: input.transcript,
             metrics: input.metrics,
             scores,
-            whatYouDidWell: whatYouDidWell.length > 0 ? whatYouDidWell : evaluation.whatYouDidWell,
+            whatYouDidWell: whatYouDidWell.length > 0 ? whatYouDidWell : (isEdgeInvalid ? [] : evaluation.whatYouDidWell),
             improveNext: improveNext.length > 0 ? improveNext : evaluation.improveNext,
             coachingStrengths: rawStrengths,
             coachingImprovements: rawImprovements,
@@ -401,15 +451,19 @@ export const attemptApi = {
             recommendedFocus: analysis.recommended_focus,
             weaknessCandidates,
             analysisVersion: analysis.analysis_version || 'ai-v1',
-            xpEarned: prog?.earned_xp || {
-              base: input.challenge.xpReward || 30,
-              dailyBonus: input.isDailyMission ? 20 : 0,
-              weaknessBonus: isWeaknessTarget ? 10 : 0,
-              personalBestBonus: 0,
-              total: (input.challenge.xpReward || 30) + (input.isDailyMission ? 20 : 0),
-            },
+            xpEarned: isEdgeInvalid
+              ? { base: 0, dailyBonus: 0, weaknessBonus: 0, personalBestBonus: 0, total: 0 }
+              : (prog?.earned_xp || {
+                  base: input.challenge.xpReward || 30,
+                  dailyBonus: input.isDailyMission ? 20 : 0,
+                  weaknessBonus: isWeaknessTarget ? 10 : 0,
+                  personalBestBonus: 0,
+                  total: (input.challenge.xpReward || 30) + (input.isDailyMission ? 20 : 0),
+                }),
             recommendation,
             isDailyMission: input.isDailyMission,
+            isValidAttempt: !isEdgeInvalid,
+            evaluationValidity: isEdgeInvalid ? 'INVALID' : ((analysis.evaluation_validity?.toUpperCase() as 'VALID' | 'PARTIAL' | 'INVALID') || 'VALID'),
           };
         }
       } catch (edgeCallErr) {
@@ -427,10 +481,12 @@ export const attemptApi = {
             p_strengths: evaluation.whatYouDidWell as unknown as Json,
             p_improvements: evaluation.improveNext as unknown as Json,
             p_weakness_candidates: [] as unknown as Json,
-            p_coach_message: `Solid effort on ${input.challenge.title}. Keep practicing daily!`,
+            p_coach_message: evaluation.isValidAttempt
+              ? `Solid effort on ${input.challenge.title}. Keep practicing daily!`
+              : 'Answer was not addressed or insufficient speech recorded.',
             p_recommended_focus: input.challenge.targetSkill,
             p_analysis_version: 'deterministic-v1',
-            p_is_daily_mission: Boolean(input.isDailyMission),
+            p_is_daily_mission: Boolean(input.isDailyMission) && evaluation.isValidAttempt,
             p_is_weakness: isWeaknessTarget,
             p_is_personal_best: isPersonalBest,
           }
@@ -460,18 +516,24 @@ export const attemptApi = {
             scores: evaluation.scores,
             whatYouDidWell: evaluation.whatYouDidWell,
             improveNext: evaluation.improveNext,
-            coachMessage: `Solid effort on ${input.challenge.title}. Keep practicing daily!`,
+            coachMessage: evaluation.isValidAttempt
+              ? `Solid effort on ${input.challenge.title}. Keep practicing daily!`
+              : 'Answer was not addressed or insufficient speech recorded.',
             recommendedFocus: input.challenge.targetSkill,
             analysisVersion: 'deterministic-v1',
-            xpEarned: res.earned_xp || {
-              base: input.challenge.xpReward || 30,
-              dailyBonus: input.isDailyMission ? 20 : 0,
-              weaknessBonus: isWeaknessTarget ? 10 : 0,
-              personalBestBonus: isPersonalBest ? 25 : 0,
-              total: (input.challenge.xpReward || 30) + (input.isDailyMission ? 20 : 0),
-            },
+            xpEarned: evaluation.isValidAttempt
+              ? (res.earned_xp || {
+                  base: input.challenge.xpReward || 30,
+                  dailyBonus: input.isDailyMission ? 20 : 0,
+                  weaknessBonus: isWeaknessTarget ? 10 : 0,
+                  personalBestBonus: isPersonalBest ? 25 : 0,
+                  total: (input.challenge.xpReward || 30) + (input.isDailyMission ? 20 : 0),
+                })
+              : { base: 0, dailyBonus: 0, weaknessBonus: 0, personalBestBonus: 0, total: 0 },
             recommendation,
             isDailyMission: input.isDailyMission,
+            isValidAttempt: evaluation.isValidAttempt,
+            evaluationValidity: evaluation.evaluationValidity,
           };
         }
       } catch (rpcCallErr) {
@@ -521,54 +583,58 @@ export const attemptApi = {
         analysis_version: 'deterministic-v1',
       });
 
-      // D. Idempotent XP Events
-      const baseXp = input.challenge.xpReward || 30;
-      const dailyBonus = input.isDailyMission ? 20 : 0;
+      // D. Idempotent XP Events (Only if valid)
+      const baseXp = evaluation.isValidAttempt ? (input.challenge.xpReward || 30) : 0;
+      const dailyBonus = (evaluation.isValidAttempt && input.isDailyMission) ? 20 : 0;
       const weaknessBonus = isWeaknessTarget ? 10 : 0;
       const personalBestBonus = isPersonalBest ? 25 : 0;
       const totalEarnedXp = baseXp + dailyBonus + weaknessBonus + personalBestBonus;
 
-      await supabase.from('xp_events').upsert({
-        user_id: userId,
-        event_type: 'challenge_completed',
-        xp_amount: baseXp,
-        attempt_id: attemptId,
-        metadata: { challenge_id: input.challenge.id },
-      });
-
-      if (input.isDailyMission) {
+      if (totalEarnedXp > 0) {
         await supabase.from('xp_events').upsert({
           user_id: userId,
-          event_type: 'daily_mission_completed',
-          xp_amount: dailyBonus,
+          event_type: 'challenge_completed',
+          xp_amount: baseXp,
           attempt_id: attemptId,
-          metadata: { mission_date: today },
+          metadata: { challenge_id: input.challenge.id },
         });
 
-        await supabase
-          .from('daily_missions')
-          .update({ completed: true, completed_at: new Date().toISOString() })
-          .eq('user_id', userId)
-          .eq('mission_date', today);
+        if (input.isDailyMission && evaluation.isValidAttempt) {
+          await supabase.from('xp_events').upsert({
+            user_id: userId,
+            event_type: 'daily_mission_completed',
+            xp_amount: dailyBonus,
+            attempt_id: attemptId,
+            metadata: { mission_date: today },
+          });
+
+          await supabase
+            .from('daily_missions')
+            .update({ completed: true, completed_at: new Date().toISOString() })
+            .eq('user_id', userId)
+            .eq('mission_date', today);
+        }
       }
 
-      // E. Update user_skills
-      const skillsToUpdate = [
-        { name: 'Fluency', score: evaluation.scores.fluency },
-        { name: 'Clarity', score: evaluation.scores.clarity },
-        { name: 'Vocabulary', score: evaluation.scores.vocabulary },
-        { name: 'Grammar', score: evaluation.scores.grammar },
-        { name: 'Confidence', score: evaluation.scores.confidence },
-      ];
+      // E. Update user_skills (Only if valid attempt)
+      if (evaluation.isValidAttempt) {
+        const skillsToUpdate = [
+          { name: 'Fluency', score: evaluation.scores.fluency },
+          { name: 'Clarity', score: evaluation.scores.clarity },
+          { name: 'Vocabulary', score: evaluation.scores.vocabulary },
+          { name: 'Grammar', score: evaluation.scores.grammar },
+          { name: 'Confidence', score: evaluation.scores.confidence },
+        ];
 
-      for (const s of skillsToUpdate) {
-        await supabase.from('user_skills').upsert({
-          user_id: userId,
-          skill_name: s.name,
-          current_score: s.score,
-          best_score: s.score,
-          last_assessed_at: new Date().toISOString(),
-        });
+        for (const s of skillsToUpdate) {
+          await supabase.from('user_skills').upsert({
+            user_id: userId,
+            skill_name: s.name,
+            current_score: s.score,
+            best_score: s.score,
+            last_assessed_at: new Date().toISOString(),
+          });
+        }
       }
 
       // F. Update user_streaks
@@ -702,20 +768,20 @@ export const attemptApi = {
 
       const scores: ChallengeScoreBreakdown = analysisRow
         ? {
-            overallScore: analysisRow.overall_score,
-            fluency: analysisRow.fluency_score,
-            clarity: analysisRow.clarity_score,
-            vocabulary: analysisRow.vocabulary_score,
-            grammar: analysisRow.grammar_score,
-            confidence: analysisRow.confidence_score,
+            overallScore: typeof analysisRow.overall_score === 'number' ? analysisRow.overall_score : 0,
+            fluency: typeof analysisRow.fluency_score === 'number' ? analysisRow.fluency_score : 0,
+            clarity: typeof analysisRow.clarity_score === 'number' ? analysisRow.clarity_score : 0,
+            vocabulary: typeof analysisRow.vocabulary_score === 'number' ? analysisRow.vocabulary_score : 0,
+            grammar: typeof analysisRow.grammar_score === 'number' ? analysisRow.grammar_score : 0,
+            confidence: typeof analysisRow.confidence_score === 'number' ? analysisRow.confidence_score : 0,
           }
         : {
-            overallScore: 80,
-            fluency: 80,
-            clarity: 80,
-            vocabulary: 80,
-            grammar: 80,
-            confidence: 80,
+            overallScore: 0,
+            fluency: 0,
+            clarity: 0,
+            vocabulary: 0,
+            grammar: 0,
+            confidence: 0,
           };
 
       const rawStrengths = Array.isArray(analysisRow?.strengths) ? analysisRow.strengths : [];
@@ -739,6 +805,10 @@ export const attemptApi = {
         )
         .filter(Boolean);
 
+      const isInvalid = scores.overallScore === 0 || (whatYouDidWell.length === 0 && (attemptRow.transcript || '').trim().split(/\s+/).length < 5);
+      const isValidAttempt = !isInvalid;
+      const evaluationValidity = isInvalid ? 'INVALID' : (scores.overallScore < 60 ? 'PARTIAL' : 'VALID');
+
       const weaknessCandidates = Array.isArray(analysisRow?.weakness_candidates)
         ? (analysisRow.weakness_candidates as unknown as WeaknessCandidate[])
         : [];
@@ -761,7 +831,7 @@ export const attemptApi = {
         durationSeconds: attemptRow.duration_seconds || 0,
         transcript: attemptRow.transcript || '',
         scores,
-        whatYouDidWell: whatYouDidWell.length > 0 ? whatYouDidWell : ['Clear and consistent vocal delivery.'],
+        whatYouDidWell: whatYouDidWell.length > 0 ? whatYouDidWell : (isInvalid ? [] : ['Clear and consistent vocal delivery.']),
         improveNext: improveNext.length > 0 ? improveNext : ['Maintain daily practice to build conversational flow.'],
         coachingStrengths: rawStrengths,
         coachingImprovements: rawImprovements,
@@ -770,13 +840,15 @@ export const attemptApi = {
         weaknessCandidates,
         analysisVersion: analysisRow?.analysis_version || 'ai-v1',
         xpEarned: {
-          base: challenge.xpReward || 30,
+          base: isInvalid ? 0 : (challenge.xpReward || 30),
           dailyBonus,
           weaknessBonus,
           personalBestBonus,
-          total: totalXp || challenge.xpReward || 30,
+          total: isInvalid ? 0 : (totalXp || challenge.xpReward || 30),
         },
         recommendation,
+        isValidAttempt,
+        evaluationValidity,
       };
     } catch (err) {
       console.error('Error fetching attempt by ID:', err);

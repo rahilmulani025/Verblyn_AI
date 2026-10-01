@@ -101,6 +101,8 @@ export interface AISkillBreakdown {
 export interface AIAnalysisResult {
   transcription?: string; // Authoritative verbatim transcription generated directly from spoken audio
   overall_score: number;
+  evaluation_validity?: 'VALID' | 'PARTIAL' | 'INVALID';
+  is_valid_attempt?: boolean;
   task_completion: AITaskCompletion;
   skills: AISkillBreakdown;
   strengths: AIStrength[];
