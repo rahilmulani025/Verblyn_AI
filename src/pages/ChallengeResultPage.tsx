@@ -22,9 +22,15 @@ import {
   Lightbulb,
 } from 'lucide-react';
 
+import { GeminiKeyModal } from '@/components/settings/GeminiKeyModal';
+import { GeminiErrorInfo } from '@/services/gemini/gemini.types';
+
 interface LocationState {
   attempt?: ChallengeAttempt;
   challenge?: Challenge;
+  aiUnavailable?: boolean;
+  aiError?: GeminiErrorInfo;
+  transcript?: string;
 }
 
 export const ChallengeResultPage: React.FC = () => {
@@ -35,10 +41,15 @@ export const ChallengeResultPage: React.FC = () => {
   const state = location.state as LocationState | null;
   const [attempt, setAttempt] = useState<ChallengeAttempt | null>(state?.attempt || null);
   const [challenge, setChallenge] = useState<Challenge | null>(state?.challenge || null);
-  const [loading, setLoading] = useState(!state?.attempt && !state?.challenge);
+  const [loading, setLoading] = useState(!state?.attempt && !state?.challenge && !state?.aiUnavailable && !state?.aiError);
+  const [keyModalOpen, setKeyModalOpen] = useState(false);
 
   // Fallback hydration on refresh from authoritative challenge_attempts and attempt_analysis
   useEffect(() => {
+    if (state?.aiUnavailable || state?.aiError) {
+      setLoading(false);
+      return;
+    }
     if (attempt && challenge) return;
 
     async function hydrate() {
@@ -54,7 +65,7 @@ export const ChallengeResultPage: React.FC = () => {
     }
 
     hydrate();
-  }, [id, attempt, challenge]);
+  }, [id, attempt, challenge, state]);
 
   if (loading) {
     return (
@@ -65,6 +76,96 @@ export const ChallengeResultPage: React.FC = () => {
       </AppShell>
     );
   }
+
+  // Handle AI Evaluation Unavailable (Quota / System Error)
+  if (state?.aiUnavailable || state?.aiError) {
+    const errorInfo = state?.aiError;
+    const recordedTranscript = state?.transcript || attempt?.transcript || '';
+
+    return (
+      <AppShell title="AI Evaluation Notice" showNav={false} showHeader={true}>
+        <PageContainer className="flex-1 flex flex-col justify-between py-4 space-y-4">
+          <div className="space-y-4">
+            <div className="text-center space-y-1">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-semibold">
+                <AlertCircle className="w-3.5 h-3.5" /> AI Evaluation Unavailable
+              </div>
+              <h2 className="text-xl font-bold tracking-tight text-foreground">
+                {challenge?.title || 'Challenge Performance'}
+              </h2>
+            </div>
+
+            <Card className="border-2 border-amber-500/40 bg-gradient-to-br from-amber-500/10 via-card to-card">
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-amber-500/15 border border-amber-500/30">
+                    <Bot className="w-5 h-5 text-amber-400" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">
+                      System Notice
+                    </span>
+                    <h3 className="text-sm font-bold text-foreground">
+                      {errorInfo?.userFacingTitle || 'Gemini Free Quota Reached'}
+                    </h3>
+                  </div>
+                </div>
+
+                <p className="text-xs text-foreground/90 leading-relaxed font-medium">
+                  {errorInfo?.userFacingMessage ||
+                    'Your Gemini API free quota has been reached, so Verblyn could not analyze this response. Your speech was recorded, but AI evaluation is temporarily unavailable.'}
+                </p>
+
+                {recordedTranscript && (
+                  <div className="p-3 rounded-xl bg-secondary/60 border border-border/70 space-y-1">
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                      Spoken Response Recorded:
+                    </span>
+                    <p className="text-xs text-foreground/90 font-mono italic leading-relaxed">
+                      "{recordedTranscript}"
+                    </p>
+                  </div>
+                )}
+
+                <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-300 font-medium flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                  <span>Your speech was NOT marked as failed or scored 0. Progression remains safe.</span>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="space-y-2 pt-4 mt-auto">
+            <Button
+              onClick={() => setKeyModalOpen(true)}
+              className="w-full min-h-[48px] touch-target text-sm font-semibold gap-2 shadow-md"
+            >
+              <Zap className="w-4 h-4" /> Enter New API Key
+            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => navigate(`/challenge/${id || challenge?.id}`, { replace: true })}
+                className="flex-1 min-h-[44px] touch-target text-xs gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" /> Try Drill Again
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => navigate('/home')}
+                className="flex-1 min-h-[44px] touch-target text-xs gap-1.5"
+              >
+                Return Home
+              </Button>
+            </div>
+          </div>
+
+          <GeminiKeyModal open={keyModalOpen} onOpenChange={setKeyModalOpen} />
+        </PageContainer>
+      </AppShell>
+    );
+  }
+
 
   const transcriptText = (attempt?.transcript || '').trim();
   const rawWords = transcriptText.split(/\s+/).filter(Boolean);

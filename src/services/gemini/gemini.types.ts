@@ -168,6 +168,27 @@ export type AICoachAction =
   | 'analyze_attempt'
   | 'transcribe_audio';
 
+export type GeminiErrorType =
+  | 'QUOTA_EXHAUSTED'
+  | 'RATE_LIMITED'
+  | 'INVALID_API_KEY'
+  | 'PERMISSION_DENIED'
+  | 'SERVICE_UNAVAILABLE'
+  | 'MODEL_UNAVAILABLE'
+  | 'INVALID_REQUEST'
+  | 'NETWORK_ERROR'
+  | 'UNKNOWN_AI_ERROR';
+
+export interface GeminiErrorInfo {
+  type: GeminiErrorType;
+  code: string;
+  message: string;
+  userFacingTitle: string;
+  userFacingMessage: string;
+  retryable: boolean;
+  httpStatus?: number;
+}
+
 export interface AICoachRequest {
   action: AICoachAction;
   gemini_api_key: string;
@@ -182,8 +203,9 @@ export interface AICoachResponse<T = unknown> {
   success: boolean;
   action: AICoachAction;
   data?: T;
-  error?: string | { code?: string; message?: string };
+  error?: string | { code?: string; message?: string; type?: GeminiErrorType };
   code?: string;
 }
+
 
 

@@ -84,6 +84,7 @@ function buildErrorResponse(message: string, code = "AI_SERVICE_ERROR", status =
       error: {
         code,
         message,
+        type: code,
       },
       code,
     }),
@@ -108,6 +109,7 @@ async function parseGeminiError(res: Response): Promise<{ code: string; message:
   const lowerMsg = rawMsg.toLowerCase();
   const detailsStr = JSON.stringify(errorJson?.error?.details || "").toLowerCase();
 
+  // 1. Invalid API Key / Permissions
   if (
     (status === 400 && (lowerMsg.includes("api key") || lowerMsg.includes("apikey") || detailsStr.includes("api_key"))) ||
     status === 401 ||
@@ -119,10 +121,28 @@ async function parseGeminiError(res: Response): Promise<{ code: string; message:
     };
   }
 
-  if (status === 429 || statusStr === "RESOURCE_EXHAUSTED" || lowerMsg.includes("quota") || lowerMsg.includes("rate limit")) {
+  // 2. Daily / Free-Tier Quota Exhaustion
+  if (
+    statusStr === "RESOURCE_EXHAUSTED" ||
+    lowerMsg.includes("quota") ||
+    lowerMsg.includes("generaterequestsperday") ||
+    lowerMsg.includes("generate_content_free_tier") ||
+    lowerMsg.includes("free tier") ||
+    lowerMsg.includes("exceeded your current quota") ||
+    lowerMsg.includes("daily quota") ||
+    detailsStr.includes("quota")
+  ) {
     return {
-      code: "QUOTA_EXCEEDED",
-      message: "Your Gemini API quota limit has been reached. Please retry in a few moments or check your Google AI Studio quota.",
+      code: "QUOTA_EXHAUSTED",
+      message: "Your Gemini API free quota limit has been reached. You can enter a new API key or try again after your quota resets.",
+    };
+  }
+
+  // 3. Short-term Rate Limiting (per-minute limits)
+  if (status === 429 || lowerMsg.includes("rate limit") || lowerMsg.includes("too many requests")) {
+    return {
+      code: "RATE_LIMITED",
+      message: "Gemini is temporarily rate limited. Please wait a moment and try again.",
     };
   }
 
@@ -142,7 +162,7 @@ async function parseGeminiError(res: Response): Promise<{ code: string; message:
 
   if (status >= 500) {
     return {
-      code: "GEMINI_PROVIDER_ERROR",
+      code: "SERVICE_UNAVAILABLE",
       message: "Google Gemini service encountered a temporary error. Please try again in a few moments.",
     };
   }

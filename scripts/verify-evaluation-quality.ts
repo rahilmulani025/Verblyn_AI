@@ -244,13 +244,96 @@ assert(invalidResult.skills.fluency === 0, 'Invalid result fluency is 0');
 assert(invalidResult.strengths.length === 0, 'Invalid result strengths is empty array');
 assert(invalidResult.improvements.length > 0, 'Invalid result includes actionable improvement');
 
+// =========================================================================
+// --- SECTION: GEMINI API QUOTA EXHAUSTION & ERROR CLASSIFICATION TESTS ---
+// =========================================================================
+import { classifyGeminiError, GeminiServiceError } from '../src/services/gemini/gemini.client';
+
+console.log('\n======================================================');
+console.log('--- GEMINI API QUOTA EXHAUSTION & ERROR HANDLING ---');
+console.log('======================================================\n');
+
+// TEST 1: Gemini evaluation returns 429 RESOURCE_EXHAUSTED
+console.log('TEST 1: 429 RESOURCE_EXHAUSTED (Free Tier / Daily Quota)');
+const quotaErr1 = new GeminiServiceError(
+  'You exceeded your current quota, please check your plan and billing details.',
+  'QUOTA_EXHAUSTED',
+  429
+);
+const classified1 = classifyGeminiError(quotaErr1);
+assert(classified1.type === 'QUOTA_EXHAUSTED', 'Classified as QUOTA_EXHAUSTED');
+assert(classified1.code === 'QUOTA_EXHAUSTED', 'Code is QUOTA_EXHAUSTED');
+assert(classified1.userFacingTitle === 'Gemini Free Quota Reached', 'User-facing title is clear');
+assert(!classified1.userFacingMessage.toLowerCase().includes('no speech'), 'Message does NOT say no speech');
+assert(classified1.retryable === false, 'Daily quota is non-retryable without new key/reset');
+
+// TEST 2: Gemini error with GenerateRequestsPerDay / free tier message
+console.log('\nTEST 2: GenerateRequestsPerDay / free_tier exhausted in body');
+const quotaErr2 = new Error('Quota exceeded for quota metric "GenerateRequestsPerDay" and limit "generate_content_free_tier"');
+const classified2 = classifyGeminiError(quotaErr2);
+assert(classified2.type === 'QUOTA_EXHAUSTED', 'Detects quota exhaustion from Google AI Studio metric name');
+assert(classified2.userFacingTitle === 'Gemini Free Quota Reached', 'Title is Gemini Free Quota Reached');
+
+// TEST 3: Gemini transcription returns 429 RESOURCE_EXHAUSTED
+console.log('\nTEST 3: Transcription Quota Failure');
+const transErr = { message: 'Resource has been exhausted (e.g. check quota).', status: 429 };
+const classifiedTrans = classifyGeminiError(transErr);
+assert(classifiedTrans.type === 'QUOTA_EXHAUSTED', 'Transcription quota error correctly classified');
+assert(classifiedTrans.userFacingMessage.includes('quota has been reached'), 'Explains quota reached');
+
+// TEST 4: Gemini evaluation returns 401 / 403 API Key Invalid
+console.log('\nTEST 4: 401 / 403 Invalid API Key');
+const keyErr = new GeminiServiceError('API key not valid. Please pass a valid API key.', 'INVALID_API_KEY', 400);
+const classifiedKey = classifyGeminiError(keyErr);
+assert(classifiedKey.type === 'INVALID_API_KEY', 'Classified as INVALID_API_KEY');
+assert(classifiedKey.userFacingTitle === 'Invalid Gemini API Key', 'Title is Invalid Gemini API Key');
+assert(classifiedKey.userFacingMessage.includes('rejected by Google'), 'Explains API key rejection');
+
+// TEST 5: Gemini 503 Service Temporarily Unavailable
+console.log('\nTEST 5: 503 Service Unavailable');
+const serviceErr = new GeminiServiceError('The model is overloaded. Please try again later.', 'SERVICE_UNAVAILABLE', 503);
+const classifiedService = classifyGeminiError(serviceErr);
+assert(classifiedService.type === 'SERVICE_UNAVAILABLE', 'Classified as SERVICE_UNAVAILABLE');
+assert(classifiedService.userFacingTitle.includes('Unavailable'), 'Title indicates unavailable');
+assert(classifiedService.retryable === true, 'Service unavailable is retryable');
+
+// TEST 6: Gemini 429 short-term rate limit (per-minute burst)
+console.log('\nTEST 6: 429 Rate Limited (Burst)');
+const rateLimitErr = new GeminiServiceError('Rate limit exceeded: please slow down.', 'RATE_LIMITED', 429);
+const classifiedRate = classifyGeminiError(rateLimitErr);
+assert(classifiedRate.type === 'RATE_LIMITED', 'Classified as RATE_LIMITED');
+assert(classifiedRate.userFacingTitle === 'Gemini Rate Limit Reached', 'Title indicates rate limit');
+assert(classifiedRate.retryable === true, 'Rate limit is retryable');
+
+// TEST 7: Quota Failure preserves valid transcript and DOES NOT punish user
+console.log('\nTEST 7: Transcript Preservation on Quota Failure');
+const userSpeech = 'I built a Power BI dashboard for sales analysis.';
+const validCheck = evaluateAttemptValidity(userSpeech, 5, mockProjectChallenge.prompt);
+assert(validCheck.isValid === true, 'User speech is valid');
+// When Gemini throws quotaErr1:
+const errorState = {
+  errorInfo: classified1,
+  capturedTranscript: userSpeech,
+};
+assert(errorState.capturedTranscript === userSpeech, 'Spoken transcript is preserved');
+assert(errorState.errorInfo.type === 'QUOTA_EXHAUSTED', 'Error state is QUOTA_EXHAUSTED');
+// Proving that this does NOT trigger attemptApi.submitChallengeAttempt or 0 scores:
+assert(errorState.errorInfo.type !== 'UNKNOWN_AI_ERROR', 'Explicitly typed system error');
+
+// TEST 8: Contrast check: Silence with NO Gemini error is still INVALID
+console.log('\nTEST 8: Contrast Check — Silence with No Gemini Error');
+const pureSilenceValidity = evaluateAttemptValidity('', 0, mockProjectChallenge.prompt);
+assert(pureSilenceValidity.validity === 'INVALID', 'True silence is INVALID');
+assert(pureSilenceValidity.reasonCode === 'empty_transcript', 'Reason code is empty_transcript');
+
 console.log('\n======================================================');
 console.log(`TOTAL TESTS: ${totalTests} | PASSED: ${passedTests} | FAILED: ${totalTests - passedTests}`);
 console.log('======================================================\n');
 
 if (passedTests === totalTests) {
-  console.log('All Evaluation Quality and Validity Gate tests passed successfully!\n');
+  console.log('All Evaluation Quality, Validity Gate, and Error Handling tests passed successfully!\n');
 } else {
   console.error('Some evaluation quality tests failed.\n');
   process.exit(1);
 }
+

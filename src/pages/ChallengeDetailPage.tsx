@@ -26,9 +26,11 @@ import {
 } from 'lucide-react';
 
 import { useGeminiKey } from '@/context/GeminiKeyContext';
+import { GeminiKeyModal } from '@/components/settings/GeminiKeyModal';
 import { geminiApi } from '@/services/gemini/gemini.api';
-import { AIAnalysisResult } from '@/services/gemini/gemini.types';
-import { evaluateAttemptValidity, createInvalidAnalysisResult } from '@/features/challenges/evaluationValidity';
+import { classifyGeminiError } from '@/services/gemini/gemini.client';
+import { AIAnalysisResult, GeminiErrorInfo } from '@/services/gemini/gemini.types';
+import { evaluateAttemptValidity, createInvalidAnalysisResult, validateAIAnalysisResult } from '@/features/challenges/evaluationValidity';
 
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -59,6 +61,11 @@ export const ChallengeDetailPage: React.FC = () => {
   const [seconds, setSeconds] = useState<number>(0);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [aiError, setAiError] = useState<{
+    errorInfo: GeminiErrorInfo;
+    capturedTranscript: string;
+  } | null>(null);
+  const [keyModalOpen, setKeyModalOpen] = useState<boolean>(false);
 
   const timerRef = useRef<number | null>(null);
   const countdownRef = useRef<number | null>(null);
@@ -252,10 +259,25 @@ export const ChallengeDetailPage: React.FC = () => {
             authoritativeTranscript = aiAnalysis.transcription.trim();
             calculatedMetrics = calculateSpeechMetrics(authoritativeTranscript, elapsed);
           }
-        } catch (geminiErr) {
+        } catch (geminiErr: unknown) {
+          const classified = classifyGeminiError(geminiErr);
           if (process.env.NODE_ENV === 'development') {
-            console.warn('Gemini evaluation notice (falling back to server analysis):', geminiErr);
+            console.error('[Gemini AI Evaluation Error Classified]:', classified);
           }
+
+          // A Gemini API failure is a system failure, NOT a user speech failure.
+          // DO NOT score as 0, DO NOT mark as invalid/no-speech, and DO NOT mutate DB!
+          setAiError({
+            errorInfo: classified,
+            capturedTranscript: authoritativeTranscript,
+          });
+          setStatus('SUBMITTED');
+          analytics.track('analysis_failed', {
+            challenge_id: challenge.id,
+            error_code: classified.code,
+            error_type: classified.type,
+          });
+          return;
         }
       }
 
@@ -416,8 +438,85 @@ export const ChallengeDetailPage: React.FC = () => {
             </CardContent>
           </Card>
 
+          {/* AI SERVICE / QUOTA ERROR CARD */}
+          {aiError && (
+            <Card className="border-2 border-amber-500/40 bg-gradient-to-br from-amber-500/10 via-card to-card shadow-md">
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 rounded-xl bg-amber-500/15 border border-amber-500/30">
+                      <AlertCircle className="w-5 h-5 text-amber-400" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">
+                        AI System Notice
+                      </span>
+                      <h3 className="text-sm font-bold text-foreground">
+                        {aiError.errorInfo.userFacingTitle}
+                      </h3>
+                    </div>
+                  </div>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-secondary border border-border text-muted-foreground font-mono">
+                    {aiError.errorInfo.code}
+                  </span>
+                </div>
+
+                <p className="text-xs text-foreground/90 leading-relaxed font-medium">
+                  {aiError.errorInfo.userFacingMessage}
+                </p>
+
+                {aiError.capturedTranscript && (
+                  <div className="p-3 rounded-xl bg-secondary/60 border border-border/70 space-y-1">
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                      Spoken Response Recorded:
+                    </span>
+                    <p className="text-xs text-foreground/90 font-mono italic leading-relaxed">
+                      "{aiError.capturedTranscript}"
+                    </p>
+                  </div>
+                )}
+
+                <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-300 font-medium flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                  <span>Your speech was NOT marked as failed or scored 0. Progression remains safe.</span>
+                </div>
+
+                <div className="pt-2 flex flex-col gap-2">
+                  <Button
+                    type="button"
+                    onClick={() => setKeyModalOpen(true)}
+                    className="w-full min-h-[44px] touch-target text-xs font-semibold gap-2 shadow-sm"
+                  >
+                    <Zap className="w-3.5 h-3.5" /> Enter New API Key
+                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setAiError(null);
+                        handleSubmit();
+                      }}
+                      className="flex-1 min-h-[40px] touch-target text-xs gap-1.5"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" /> Retry Evaluation
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => navigate('/home')}
+                      className="flex-1 min-h-[40px] touch-target text-xs gap-1.5"
+                    >
+                      Try Again Later
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Error Message Banner */}
-          {errorMessage && (
+          {errorMessage && !aiError && (
             <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300 flex items-start justify-between gap-2">
               <div className="flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -440,128 +539,136 @@ export const ChallengeDetailPage: React.FC = () => {
           )}
 
           {/* SPEAKING CONSOLE */}
-          <div className="p-5 rounded-2xl bg-card border border-border/70 flex flex-col items-center gap-4 shadow-sm">
-            <div className="flex items-center justify-between w-full text-xs">
-              <span className="font-mono text-base font-bold text-foreground">
-                {Math.floor(seconds / 60)}:{(seconds % 60).toString().padStart(2, '0')} /{' '}
-                {challenge.durationSeconds}s
-              </span>
-              <PacingIndicator wpm={currentWpm} />
+          {!aiError && (
+            <div className="p-5 rounded-2xl bg-card border border-border/70 flex flex-col items-center gap-4 shadow-sm">
+              <div className="flex items-center justify-between w-full text-xs">
+                <span className="font-mono text-base font-bold text-foreground">
+                  {Math.floor(seconds / 60)}:{(seconds % 60).toString().padStart(2, '0')} /{' '}
+                  {challenge.durationSeconds}s
+                </span>
+                <PacingIndicator wpm={currentWpm} />
+              </div>
+
+              {/* State Buttons */}
+              {status === 'STARTED' && (
+                <div className="flex flex-col items-center gap-3 py-2">
+                  <button
+                    type="button"
+                    onClick={handleStartCountdown}
+                    className="w-20 h-20 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 active:scale-95 transition-transform shadow-lg touch-target"
+                    aria-label="Start recording challenge"
+                  >
+                    <Play className="w-8 h-8 fill-primary-foreground ml-1" />
+                  </button>
+                  <span className="text-xs font-semibold text-foreground">Tap to Begin Drill</span>
+                </div>
+              )}
+
+              {status === 'IN_PROGRESS' && !isListening && (
+                <div className="flex flex-col items-center justify-center py-4">
+                  <div className="w-20 h-20 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center animate-ping">
+                    <span className="text-3xl font-extrabold text-primary">{countdown}</span>
+                  </div>
+                  <span className="text-xs text-muted-foreground mt-3 font-medium">Get ready...</span>
+                </div>
+              )}
+
+              {status === 'IN_PROGRESS' && isListening && (
+                <div className="flex flex-col items-center gap-3 py-2">
+                  <button
+                    type="button"
+                    onClick={handleStopSpeaking}
+                    className="w-20 h-20 rounded-full bg-rose-600 text-white flex items-center justify-center ring-4 ring-rose-500/30 animate-pulse active:scale-95 transition-transform shadow-lg touch-target"
+                    aria-label="Stop recording"
+                  >
+                    <MicOff className="w-8 h-8" />
+                  </button>
+                  <span className="text-xs font-semibold text-rose-400">
+                    Speaking... Tap when finished
+                  </span>
+                </div>
+              )}
+
+              {status === 'SUBMITTED' && (
+                <div className="flex flex-col items-center gap-2 py-2">
+                  <div className="w-16 h-16 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                    <CheckCircle2 className="w-8 h-8" />
+                  </div>
+                  <span className="text-xs font-semibold text-foreground">
+                    Spoken Response Ready ({seconds}s)
+                  </span>
+                </div>
+              )}
+
+              {status === 'ANALYZING' && (
+                <div className="flex flex-col items-center gap-2 py-2">
+                  <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  <span className="text-xs font-semibold text-foreground">Analyzing Delivery...</span>
+                </div>
+              )}
+
+              {/* Live Transcript View */}
+              {(transcript || interimTranscript) && (
+                <div className="w-full p-3.5 rounded-xl bg-secondary/50 border border-border/40 text-xs text-foreground leading-relaxed max-h-32 overflow-y-auto">
+                  <h4 className="font-semibold text-muted-foreground text-[11px] mb-1">
+                    Live Transcription (Preview):
+                  </h4>
+                  <p>
+                    {transcript}
+                    {interimTranscript && (
+                      <span className="text-muted-foreground/60 italic"> {interimTranscript}</span>
+                    )}
+                  </p>
+                </div>
+              )}
             </div>
-
-            {/* State Buttons */}
-            {status === 'STARTED' && (
-              <div className="flex flex-col items-center gap-3 py-2">
-                <button
-                  type="button"
-                  onClick={handleStartCountdown}
-                  className="w-20 h-20 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 active:scale-95 transition-transform shadow-lg touch-target"
-                  aria-label="Start recording challenge"
-                >
-                  <Play className="w-8 h-8 fill-primary-foreground ml-1" />
-                </button>
-                <span className="text-xs font-semibold text-foreground">Tap to Begin Drill</span>
-              </div>
-            )}
-
-            {status === 'IN_PROGRESS' && !isListening && (
-              <div className="flex flex-col items-center justify-center py-4">
-                <div className="w-20 h-20 rounded-full bg-primary/20 border-2 border-primary flex items-center justify-center animate-ping">
-                  <span className="text-3xl font-extrabold text-primary">{countdown}</span>
-                </div>
-                <span className="text-xs text-muted-foreground mt-3 font-medium">Get ready...</span>
-              </div>
-            )}
-
-            {status === 'IN_PROGRESS' && isListening && (
-              <div className="flex flex-col items-center gap-3 py-2">
-                <button
-                  type="button"
-                  onClick={handleStopSpeaking}
-                  className="w-20 h-20 rounded-full bg-rose-600 text-white flex items-center justify-center ring-4 ring-rose-500/30 animate-pulse active:scale-95 transition-transform shadow-lg touch-target"
-                  aria-label="Stop recording"
-                >
-                  <MicOff className="w-8 h-8" />
-                </button>
-                <span className="text-xs font-semibold text-rose-400">
-                  Speaking... Tap when finished
-                </span>
-              </div>
-            )}
-
-            {status === 'SUBMITTED' && (
-              <div className="flex flex-col items-center gap-2 py-2">
-                <div className="w-16 h-16 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                  <CheckCircle2 className="w-8 h-8" />
-                </div>
-                <span className="text-xs font-semibold text-foreground">
-                  Spoken Response Ready ({seconds}s)
-                </span>
-              </div>
-            )}
-
-            {status === 'ANALYZING' && (
-              <div className="flex flex-col items-center gap-2 py-2">
-                <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                <span className="text-xs font-semibold text-foreground">Analyzing Delivery...</span>
-              </div>
-            )}
-
-            {/* Live Transcript View */}
-            {(transcript || interimTranscript) && (
-              <div className="w-full p-3.5 rounded-xl bg-secondary/50 border border-border/40 text-xs text-foreground leading-relaxed max-h-32 overflow-y-auto">
-                <h4 className="font-semibold text-muted-foreground text-[11px] mb-1">
-                  Live Transcription (Preview):
-                </h4>
-                <p>
-                  {transcript}
-                  {interimTranscript && (
-                    <span className="text-muted-foreground/60 italic"> {interimTranscript}</span>
-                  )}
-                </p>
-              </div>
-            )}
-          </div>
+          )}
         </div>
 
         {/* BOTTOM ACTION BUTTONS */}
-        <div className="space-y-2 pt-2 mt-auto">
-          {status === 'SUBMITTED' && (
-            <div className="flex gap-2">
+        {!aiError && (
+          <div className="space-y-2 pt-2 mt-auto">
+            {status === 'SUBMITTED' && (
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleReset}
+                  className="flex-1 min-h-[44px] touch-target text-xs gap-1.5"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" /> Start Over
+                </Button>
+              </div>
+            )}
+
+            {status === 'SUBMITTED' ? (
               <Button
                 type="button"
-                variant="outline"
-                onClick={handleReset}
-                className="flex-1 min-h-[44px] touch-target text-xs gap-1.5"
+                onClick={handleSubmit}
+                disabled={submitting}
+                className="w-full min-h-[48px] touch-target text-sm font-semibold gap-2 shadow-md"
               >
-                <RotateCcw className="w-3.5 h-3.5" /> Start Over
+                {submitting ? 'Analyzing Performance...' : 'Submit & Analyze'}
+                <ArrowRight className="w-4 h-4" />
               </Button>
-            </div>
-          )}
+            ) : status === 'STARTED' ? (
+              <Button
+                type="button"
+                onClick={handleStartCountdown}
+                className="w-full min-h-[48px] touch-target text-sm font-semibold gap-2 shadow-md"
+              >
+                Start Challenge <ArrowRight className="w-4 h-4" />
+              </Button>
+            ) : null}
+          </div>
+        )}
 
-          {status === 'SUBMITTED' ? (
-            <Button
-              type="button"
-              onClick={handleSubmit}
-              disabled={submitting}
-              className="w-full min-h-[48px] touch-target text-sm font-semibold gap-2 shadow-md"
-            >
-              {submitting ? 'Analyzing Performance...' : 'Submit & Analyze'}
-              <ArrowRight className="w-4 h-4" />
-            </Button>
-          ) : status === 'STARTED' ? (
-            <Button
-              type="button"
-              onClick={handleStartCountdown}
-              className="w-full min-h-[48px] touch-target text-sm font-semibold gap-2 shadow-md"
-            >
-              Start Challenge <ArrowRight className="w-4 h-4" />
-            </Button>
-          ) : null}
-        </div>
+        {/* BYOK Key Management Modal */}
+        <GeminiKeyModal open={keyModalOpen} onOpenChange={setKeyModalOpen} />
       </PageContainer>
     </AppShell>
   );
 };
 
 export default ChallengeDetailPage;
+
