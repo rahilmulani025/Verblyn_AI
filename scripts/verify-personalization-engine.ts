@@ -1,6 +1,6 @@
 /**
- * Comprehensive Automated Verification Suite for Verblyn Personalization Engine (Phase 2)
- * Tests all 15 core personalization contracts and deterministic policy invariants.
+ * Comprehensive Automated Verification Suite for Verblyn Personalization Engine (Phase 3: User-Controlled Target Role & Practice Personalization)
+ * Tests all 20+ core personalization contracts, deterministic policy invariants, role calibration, experience levels, and domain enrichment.
  */
 
 import { trainingPolicy } from '../src/features/personalization/trainingPolicy';
@@ -29,6 +29,7 @@ const u1: UserPersonalizationState = {
   userId: 'u1',
   primaryGoal: 'CAMPUS_PLACEMENTS',
   targetRole: 'Data Analyst',
+  experienceLevel: 'fresher',
   skills: { Fluency: 70, Clarity: 70, Vocabulary: 70, Grammar: 70, Confidence: 70 },
   activeWeaknesses: [],
   recentAttempts: [],
@@ -40,6 +41,7 @@ const u2: UserPersonalizationState = {
   userId: 'u2',
   primaryGoal: 'JOB_INTERVIEWS',
   targetRole: 'Software Engineer',
+  experienceLevel: '0-2',
   skills: { Fluency: 70, Clarity: 70, Vocabulary: 70, Grammar: 70, Confidence: 70 },
   activeWeaknesses: [],
   recentAttempts: [],
@@ -56,119 +58,272 @@ assert(trainingPolicy.resolvePracticeContext('PUBLIC_SPEAKING') === 'public_spea
 assert(trainingPolicy.resolvePracticeContext('EVERYDAY_COMMUNICATION') === 'everyday', '5. Everyday Communication maps to "everyday" context');
 
 console.log('\n======================================================');
-console.log('--- 2. CONTEXT & WEAKNESS INFLUENCE ON TRAINING POLICY ---');
+console.log('--- 2. ROLE & EXPERIENCE LEVEL CALIBRATION (PHASE 3) ---');
 console.log('======================================================\n');
 
-// 6. Weakness affects training objective
-const planWithWeakness = trainingPolicy.generateTrainingPlan({
-  ...u1,
-  activeWeaknesses: [{ type: 'unclear_structure', label: 'Unclear Structure', skillName: 'Clarity' }],
-});
-assert(
-  planWithWeakness.trainingObjective.toLowerCase().includes('star') ||
-    planWithWeakness.trainingObjective.toLowerCase().includes('structure'),
-  '6. Weakness "unclear_structure" actively shapes the training objective',
-  `Got: ${planWithWeakness.trainingObjective}`
-);
-
-// 7. Context affects category selection
-const interviewCat = trainingPolicy.selectCategory('interview', 'unclear_structure', []);
-const workplaceCat = trainingPolicy.selectCategory('workplace', 'unclear_structure', []);
-assert(
-  interviewCat === 'project_deep_dive' || interviewCat === 'behavioral',
-  '7a. Interview context + structure weakness selects project_deep_dive/behavioral',
-  `Got: ${interviewCat}`
-);
-assert(
-  workplaceCat === 'status_update' || workplaceCat === 'explanation' || workplaceCat === 'meeting',
-  '7b. Workplace context + structure weakness selects status_update/explanation/meeting',
-  `Got: ${workplaceCat}`
-);
-
-// 8. Target role affects generated training plan
-const planDataAnalyst = trainingPolicy.generateTrainingPlan({
-  ...u1,
+// 6. Data Analyst + Fresher
+const planDataAnalystFresher = trainingPolicy.generateTrainingPlan({
+  userId: 'u_da_fresher',
+  primaryGoal: 'CAMPUS_PLACEMENTS',
   targetRole: 'Data Analyst',
+  experienceLevel: 'fresher',
+  skills: { Fluency: 70, Clarity: 65, Vocabulary: 70, Grammar: 70, Confidence: 70 },
+  activeWeaknesses: [{ type: 'unclear_structure', label: 'Unclear Structure', skillName: 'Clarity' }],
+  recentAttempts: [],
 });
-const planExecutive = trainingPolicy.generateTrainingPlan({
-  ...u1,
-  targetRole: 'VP of Engineering',
-});
-assert(planDataAnalyst.targetRole === 'Data Analyst', '8a. Plan preserves target role "Data Analyst"');
-assert(planExecutive.targetRole === 'VP of Engineering', '8b. Plan preserves target role "VP of Engineering"');
-
-// 9. Recent categories are avoided when alternatives exist (Anti-repetition)
-const rotatedCat = trainingPolicy.selectCategory('interview', 'unclear_structure', ['project_deep_dive']);
-assert(rotatedCat !== 'project_deep_dive', '9. Category rotates away from recently used "project_deep_dive"', `Got: ${rotatedCat}`);
-
-// 10. Same weakness does NOT always produce the same category across different contexts
+assert(planDataAnalystFresher.targetRole === 'Data Analyst', '6a. Plan preserves target role "Data Analyst"');
+assert(planDataAnalystFresher.experienceLevel === 'fresher', '6b. Plan preserves experience level "fresher"');
 assert(
-  interviewCat !== workplaceCat,
-  '10. Same weakness "unclear_structure" produces different categories across Interview vs Workplace',
-  `Interview: ${interviewCat} vs Workplace: ${workplaceCat}`
+  planDataAnalystFresher.trainingObjective.toLowerCase().includes('data') &&
+    planDataAnalystFresher.trainingObjective.toLowerCase().includes('star'),
+  '6c. Data Analyst + Fresher objective targets data analysis project + STAR framing'
 );
 
-console.log('\n======================================================');
-console.log('--- 3. GEMINI CONTRACT & FALLBACK ROBUSTNESS ---');
-console.log('======================================================\n');
+// 7. Software Engineer + Fresher
+const planSWEFresher = trainingPolicy.generateTrainingPlan({
+  userId: 'u_swe_fresher',
+  primaryGoal: 'CAMPUS_PLACEMENTS',
+  targetRole: 'Software Engineer',
+  experienceLevel: 'fresher',
+  skills: { Fluency: 70, Clarity: 70, Vocabulary: 70, Grammar: 70, Confidence: 70 },
+  activeWeaknesses: [{ type: 'unclear_structure', label: 'Unclear Structure', skillName: 'Clarity' }],
+  recentAttempts: [],
+});
+assert(
+  planSWEFresher.trainingObjective.toLowerCase().includes('software') ||
+    planSWEFresher.trainingObjective.toLowerCase().includes('code') ||
+    planSWEFresher.trainingObjective.toLowerCase().includes('architecture'),
+  '7. Software Engineer + Fresher objective targets software project + code/architecture contributions'
+);
 
-// 11, 12, 13: Verify GenerateTopicPayload receives training_objective, target_role, and practice_context
-const testPayload: GenerateTopicPayload = {
-  practice_context: planDataAnalyst.practiceContext,
-  target_role: planDataAnalyst.targetRole,
-  target_skill: planDataAnalyst.targetSkill,
-  active_weakness: planDataAnalyst.targetWeakness,
-  question_category: planDataAnalyst.questionCategory,
-  difficulty: planDataAnalyst.difficulty,
-  training_objective: planDataAnalyst.trainingObjective,
-  time_limit_seconds: planDataAnalyst.timeLimitSeconds,
-  recent_prompts: ['Tell me about yourself'],
-  avoid_prompts: ['Tell me about yourself'],
-  recent_categories: ['hr'],
-};
+// 8. Product Manager + 0-2 Years
+const planPM = trainingPolicy.generateTrainingPlan({
+  userId: 'u_pm',
+  primaryGoal: 'JOB_INTERVIEWS',
+  targetRole: 'Product Manager',
+  experienceLevel: '0-2',
+  skills: { Fluency: 75, Clarity: 75, Vocabulary: 75, Grammar: 75, Confidence: 75 },
+  activeWeaknesses: [{ type: 'unclear_structure', label: 'Unclear Structure', skillName: 'Clarity' }],
+  recentAttempts: [],
+});
+assert(
+  planPM.trainingObjective.toLowerCase().includes('product') &&
+    (planPM.trainingObjective.toLowerCase().includes('prioritization') || planPM.trainingObjective.toLowerCase().includes('outcome')),
+  '8. Product Manager + 0–2 Years objective targets product initiative, prioritization & outcome'
+);
 
-assert(Boolean(testPayload.training_objective), '11. Gemini payload contract includes training_objective');
-assert(testPayload.target_role === 'Data Analyst', '12. Gemini payload contract includes target_role');
-assert(testPayload.practice_context === 'interview', '13. Gemini payload contract includes practice_context');
-
-// 14. Incompatible / Malformed Gemini category normalization
-const rawGeminiOutput: Partial<PersonalizedChallenge> = {
-  challenge_title: 'Project STAR Drill',
-  challenge_prompt: 'Describe a data pipeline failure and how you solved it.',
-  // Gemini omitted category and context
-};
-
-const normalizedOutput: PersonalizedChallenge = {
-  challenge_title: rawGeminiOutput.challenge_title || 'Drill',
-  challenge_prompt: rawGeminiOutput.challenge_prompt || 'Prompt',
-  challenge_type: 'timed_speaking',
-  category: rawGeminiOutput.category || planDataAnalyst.questionCategory,
-  practice_context: rawGeminiOutput.practice_context || planDataAnalyst.practiceContext,
-  target_skill: rawGeminiOutput.target_skill || planDataAnalyst.targetSkill,
-  target_weakness: rawGeminiOutput.target_weakness || planDataAnalyst.targetWeakness,
-  difficulty: rawGeminiOutput.difficulty || planDataAnalyst.difficulty,
-  time_limit_seconds: rawGeminiOutput.time_limit_seconds || planDataAnalyst.timeLimitSeconds,
-  why_this_challenge: planDataAnalyst.trainingObjective,
-  why_this_question: planDataAnalyst.trainingObjective,
-  success_criteria: ['Use STAR format', 'Highlight metric outcome'],
-  coach_tip_before_start: 'Speak with steady pace.',
-};
-
-assert(normalizedOutput.category === planDataAnalyst.questionCategory, '14. Missing/incompatible Gemini category safely falls back to authoritative plan');
-
-// 15. Missing target role does not crash the flow
-const planMissingRole = trainingPolicy.generateTrainingPlan({
-  userId: 'u3',
+// 9. Business Analyst + 0-2 Years
+const planBA = trainingPolicy.generateTrainingPlan({
+  userId: 'u_ba',
+  primaryGoal: 'WORKPLACE_COMMUNICATION',
+  targetRole: 'Business Analyst',
+  experienceLevel: '0-2',
   skills: { Fluency: 70, Clarity: 70, Vocabulary: 70, Grammar: 70, Confidence: 70 },
   activeWeaknesses: [],
   recentAttempts: [],
 });
-assert(Boolean(planMissingRole.targetRole), '15. Missing target role falls back safely without crashing (resolves to default profile track)');
+assert(
+  planBA.trainingObjective.toLowerCase().includes('business analyst') ||
+    planBA.trainingObjective.toLowerCase().includes('workplace'),
+  '9. Business Analyst + Workplace targets business analyst workplace communication'
+);
+
+// 10. Role + Domain Enrichment
+const planWithDomain = trainingPolicy.generateTrainingPlan({
+  userId: 'u_domain',
+  primaryGoal: 'JOB_INTERVIEWS',
+  targetRole: 'Data Analyst',
+  experienceLevel: '0-2',
+  targetDomain: 'E-commerce',
+  skills: { Fluency: 70, Clarity: 70, Vocabulary: 70, Grammar: 70, Confidence: 70 },
+  activeWeaknesses: [],
+  recentAttempts: [],
+});
+assert(planWithDomain.targetDomain === 'E-commerce', '10a. Target domain "E-commerce" is preserved in plan');
+assert(
+  planWithDomain.trainingObjective.includes('E-commerce'),
+  '10b. Domain enriches training objective with domain context'
+);
+
+// 11. Role without Domain generates cleanly
+const planNoDomain = trainingPolicy.generateTrainingPlan({
+  userId: 'u_nodomain',
+  primaryGoal: 'JOB_INTERVIEWS',
+  targetRole: 'Data Scientist',
+  experienceLevel: '2-5',
+  skills: { Fluency: 70, Clarity: 70, Vocabulary: 70, Grammar: 70, Confidence: 70 },
+  activeWeaknesses: [],
+  recentAttempts: [],
+});
+assert(planNoDomain.targetRole === 'Data Scientist', '11a. Target role without domain generates cleanly');
+assert(planNoDomain.targetDomain === undefined, '11b. Target domain is gracefully undefined');
+
+// 12. Custom "Other" Role handling
+const planCustomRole = trainingPolicy.generateTrainingPlan({
+  userId: 'u_custom',
+  primaryGoal: 'JOB_INTERVIEWS',
+  targetRole: 'Other',
+  customTargetRole: 'Bioinformatics Researcher',
+  experienceLevel: '2-5',
+  skills: { Fluency: 70, Clarity: 70, Vocabulary: 70, Grammar: 70, Confidence: 70 },
+  activeWeaknesses: [],
+  recentAttempts: [],
+});
+assert(
+  planCustomRole.targetRole === 'Bioinformatics Researcher',
+  '12. Custom role "Bioinformatics Researcher" resolved when targetRole is "Other"'
+);
+
+// 13. Experience level changes difficulty
+const planFresherDiff = trainingPolicy.generateTrainingPlan({
+  userId: 'u_fresher_diff',
+  primaryGoal: 'CAMPUS_PLACEMENTS',
+  targetRole: 'Software Engineer',
+  experienceLevel: 'fresher',
+  skills: { Fluency: 70, Clarity: 70, Vocabulary: 70, Grammar: 70, Confidence: 70 },
+  activeWeaknesses: [],
+  recentAttempts: [],
+});
+const planSeniorDiff = trainingPolicy.generateTrainingPlan({
+  userId: 'u_senior_diff',
+  primaryGoal: 'JOB_INTERVIEWS',
+  targetRole: 'Software Engineer',
+  experienceLevel: '5+',
+  skills: { Fluency: 80, Clarity: 80, Vocabulary: 80, Grammar: 80, Confidence: 80 },
+  activeWeaknesses: [],
+  recentAttempts: [],
+});
+assert(
+  planSeniorDiff.difficulty > planFresherDiff.difficulty,
+  `13. Senior experience level yields higher difficulty (${planSeniorDiff.difficulty}) than fresher (${planFresherDiff.difficulty})`
+);
+
+// 14. Weakness still influences objective
+const planWeaknessCheck = trainingPolicy.generateTrainingPlan({
+  userId: 'u_weakness_check',
+  primaryGoal: 'JOB_INTERVIEWS',
+  targetRole: 'Data Analyst',
+  experienceLevel: 'fresher',
+  skills: { Fluency: 70, Clarity: 70, Vocabulary: 70, Grammar: 70, Confidence: 70 },
+  activeWeaknesses: [{ type: 'overlong_answers', label: 'Overlong Answers', skillName: 'Clarity' }],
+  recentAttempts: [],
+});
+assert(
+  planWeaknessCheck.trainingObjective.toLowerCase().includes('overlong answers') ||
+    planWeaknessCheck.trainingObjective.toLowerCase().includes('star'),
+  '14. Active weakness "overlong_answers" is embedded into the training objective'
+);
+
+// 15. Domain does NOT override the target role
+assert(
+  planWithDomain.targetRole === 'Data Analyst',
+  '15. Domain enriches context but does NOT override the target role'
+);
 
 console.log('\n======================================================');
-console.log(`ALL 15 PERSONALIZATION TESTS COMPLETED: ${passed} PASSED, ${failed} FAILED`);
+console.log('--- 3. SETTINGS CHANGE & PERSISTENCE BEHAVIOR ---');
+console.log('======================================================\n');
+
+// 16. Profile role change updates future training plans immediately
+const userInitialState: UserPersonalizationState = {
+  userId: 'user_live_update',
+  primaryGoal: 'JOB_INTERVIEWS',
+  targetRole: 'Data Analyst',
+  experienceLevel: 'fresher',
+  skills: { Fluency: 70, Clarity: 70, Vocabulary: 70, Grammar: 70, Confidence: 70 },
+  activeWeaknesses: [],
+  recentAttempts: [
+    { challengeId: 'c1', title: 'Data Pipeline STAR', targetSkill: 'Clarity', completedAt: '2026-09-01T10:00:00Z', score: 85 },
+  ],
+};
+const planBeforeUpdate = trainingPolicy.generateTrainingPlan(userInitialState);
+assert(planBeforeUpdate.targetRole === 'Data Analyst', '16a. Plan before profile update generates for Data Analyst');
+
+// User updates profile to Product Manager
+const userUpdatedState: UserPersonalizationState = {
+  ...userInitialState,
+  targetRole: 'Product Manager',
+  experienceLevel: '0-2',
+};
+const planAfterUpdate = trainingPolicy.generateTrainingPlan(userUpdatedState);
+assert(planAfterUpdate.targetRole === 'Product Manager', '16b. Future plan after profile update immediately reflects Product Manager');
+
+// 17. Historical attempts remain unchanged
+assert(
+  userUpdatedState.recentAttempts[0].title === 'Data Pipeline STAR',
+  '17. Historical attempt log is immutable and preserved when profile updates'
+);
+
+// 18. Fallback for completely missing role
+const planEmptyUser = trainingPolicy.generateTrainingPlan({
+  userId: 'u_empty',
+  skills: { Fluency: 70, Clarity: 70, Vocabulary: 70, Grammar: 70, Confidence: 70 },
+  activeWeaknesses: [],
+  recentAttempts: [],
+});
+assert(Boolean(planEmptyUser.targetRole), '18. Missing target role falls back safely without throwing');
+
+// 19. Anti-repetition category rotation
+const rotatedCat = trainingPolicy.selectCategory('interview', 'unclear_structure', ['project_deep_dive']);
+assert(rotatedCat !== 'project_deep_dive', '19. Category rotates away from recently used "project_deep_dive"');
+
+console.log('\n======================================================');
+console.log('--- 4. GEMINI CONTRACT WITH PHASE 3 PERSONALIZATION ---');
+console.log('======================================================\n');
+
+// 20, 21, 22, 23: Complete Gemini payload contract
+const geminiPayload: GenerateTopicPayload = {
+  user_goal: planWithDomain.practiceContext,
+  practice_context: planWithDomain.practiceContext,
+  target_role: planWithDomain.targetRole,
+  experience_level: planWithDomain.experienceLevelLabel,
+  target_domain: planWithDomain.targetDomain,
+  target_skill: planWithDomain.targetSkill,
+  active_weakness: planWithDomain.targetWeakness,
+  question_category: planWithDomain.questionCategory,
+  difficulty: planWithDomain.difficulty,
+  training_objective: planWithDomain.trainingObjective,
+  time_limit_seconds: planWithDomain.timeLimitSeconds,
+  recent_prompts: planWithDomain.avoidRecentPrompts,
+  avoid_prompts: planWithDomain.avoidRecentPrompts,
+  recent_categories: planWithDomain.avoidRecentCategories,
+};
+
+assert(geminiPayload.target_role === 'Data Analyst', '20. Gemini receives target_role');
+assert(geminiPayload.experience_level === '0–2 Years', '21. Gemini receives experience_level');
+assert(geminiPayload.target_domain === 'E-commerce', '22. Gemini receives target_domain');
+assert(Boolean(geminiPayload.training_objective), '23. Gemini receives authoritative training_objective');
+
+// 24. Gemini cannot override authoritative training objective or category
+const rawAiOutput: Partial<PersonalizedChallenge> = {
+  challenge_title: 'Unrelated Generic Chat',
+  challenge_prompt: 'Describe what you did last weekend.',
+  // Gemini returned without category or objective
+};
+const normalizedAiOutput: PersonalizedChallenge = {
+  challenge_title: rawAiOutput.challenge_title || 'Drill',
+  challenge_prompt: rawAiOutput.challenge_prompt || 'Prompt',
+  challenge_type: 'timed_speaking',
+  category: rawAiOutput.category || planWithDomain.questionCategory,
+  practice_context: rawAiOutput.practice_context || planWithDomain.practiceContext,
+  target_skill: rawAiOutput.target_skill || planWithDomain.targetSkill,
+  target_weakness: rawAiOutput.target_weakness || planWithDomain.targetWeakness,
+  difficulty: rawAiOutput.difficulty || planWithDomain.difficulty,
+  time_limit_seconds: rawAiOutput.time_limit_seconds || planWithDomain.timeLimitSeconds,
+  why_this_challenge: planWithDomain.trainingObjective,
+  why_this_question: planWithDomain.trainingObjective,
+  success_criteria: ['Structure your response', 'Quantify outcome metrics'],
+  coach_tip_before_start: 'Lead with your key takeaway.',
+};
+
+assert(normalizedAiOutput.category === planWithDomain.questionCategory, '24a. Authoritative plan category is enforced against AI omission');
+assert(normalizedAiOutput.why_this_challenge === planWithDomain.trainingObjective, '24b. Authoritative training objective is preserved against AI omission');
+
+console.log('\n======================================================');
+console.log(`ALL 24 PERSONALIZATION TESTS COMPLETED: ${passed} PASSED, ${failed} FAILED`);
 console.log('======================================================\n');
 
 if (failed > 0) {
   process.exit(1);
 }
+

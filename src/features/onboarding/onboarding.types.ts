@@ -1,3 +1,5 @@
+import { TargetRole, ExperienceLevel, TargetDomain } from '@/features/personalization/personalization.types';
+
 export type UserGoal =
   | 'JOB_INTERVIEWS'
   | 'CAMPUS_PLACEMENTS'
@@ -20,6 +22,10 @@ export interface OnboardingState {
   fullName: string;
   institution: string;
   profession: UserProfessionOption;
+  targetRole?: TargetRole;
+  customTargetRole?: string;
+  experienceLevel?: ExperienceLevel;
+  targetDomain?: TargetDomain;
 }
 
 export interface OnboardingSubmission {
@@ -28,4 +34,8 @@ export interface OnboardingSubmission {
   fullName: string;
   institution?: string;
   profession: UserProfessionOption;
+  targetRole?: TargetRole;
+  customTargetRole?: string;
+  experienceLevel?: ExperienceLevel;
+  targetDomain?: TargetDomain;
 }

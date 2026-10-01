@@ -25,10 +25,14 @@ export const onboardingApi = {
 
       const success = await profileApi.updateProfile({
         fullName: data.fullName.trim(),
-        institution: data.institution?.trim() || null,
+        institution: data.institution?.trim() || undefined,
         profession: dbProfession,
         primaryGoal: data.goal,
         dailyGoalMinutes: data.dailyCommitmentMinutes,
+        targetRole: data.targetRole,
+        customTargetRole: data.customTargetRole,
+        experienceLevel: data.experienceLevel,
+        targetDomain: data.targetDomain,
         onboardingCompleted: true,
       });
 

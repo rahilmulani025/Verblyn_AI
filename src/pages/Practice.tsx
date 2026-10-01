@@ -56,8 +56,11 @@ export const Practice: React.FC = () => {
 
       // 2. Invoke Gemini topic generator with full training plan contract
       const generated = await geminiApi.generateTopic(apiKey, {
+        user_goal: plan.practiceContext,
         practice_context: plan.practiceContext,
         target_role: plan.targetRole,
+        experience_level: plan.experienceLevelLabel,
+        target_domain: plan.targetDomain,
         target_skill: plan.targetSkill,
         active_weakness: plan.targetWeakness,
         question_category: plan.questionCategory,
@@ -259,6 +262,18 @@ export const Practice: React.FC = () => {
                   {activePlan?.targetRole && (
                     <span className="inline-flex items-center gap-1 text-[11px] font-medium text-foreground px-2 py-0.5 rounded bg-secondary/80 border border-border/60">
                       <Briefcase className="w-3 h-3 text-muted-foreground" /> {activePlan.targetRole}
+                    </span>
+                  )}
+
+                  {activePlan?.experienceLevelLabel && (
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-secondary/80 text-foreground font-medium border border-border/40">
+                      {activePlan.experienceLevelLabel}
+                    </span>
+                  )}
+
+                  {activePlan?.targetDomain && (
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-primary/10 text-primary font-medium border border-primary/20">
+                      {activePlan.targetDomain}
                     </span>
                   )}
 

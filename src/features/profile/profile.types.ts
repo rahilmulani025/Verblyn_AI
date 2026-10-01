@@ -1,3 +1,5 @@
+import { TargetRole, ExperienceLevel, TargetDomain } from '@/features/personalization/personalization.types';
+
 export type UserProfession =
   | 'student'
   | 'professional'
@@ -18,6 +20,10 @@ export interface UserProfile {
   baselineCompleted?: boolean;
   dailyGoalMinutes?: number;
   primaryGoal?: string;
+  targetRole?: TargetRole | null;
+  customTargetRole?: string | null;
+  experienceLevel?: ExperienceLevel | null;
+  targetDomain?: TargetDomain | null;
   communicationStyleFocus?: string[];
   createdAt: string;
   updatedAt: string;
@@ -33,5 +39,9 @@ export interface UpdateProfileInput {
   baselineCompleted?: boolean;
   dailyGoalMinutes?: number;
   primaryGoal?: string;
+  targetRole?: TargetRole;
+  customTargetRole?: string;
+  experienceLevel?: ExperienceLevel;
+  targetDomain?: TargetDomain;
   communicationStyleFocus?: string[];
 }

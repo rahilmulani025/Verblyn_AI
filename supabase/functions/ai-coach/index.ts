@@ -12,6 +12,8 @@ interface GenerateTopicPayload {
   user_goal?: string;
   practice_context?: string;
   target_role?: string;
+  experience_level?: string;
+  target_domain?: string;
   active_weakness?: string;
   target_skill?: string;
   weakest_skill?: string;
@@ -231,17 +233,21 @@ serve(async (req: Request) => {
 Generate a tailored, high-impact speaking challenge strictly driven by the authoritative training plan provided by Verblyn.
 
 MANDATORY RULES:
-1. THE TRAINING PLAN IS AUTHORITATIVE: Strictly adhere to the requested practice context, category, target skill, weakness, and training objective.
+1. THE TRAINING PLAN IS AUTHORITATIVE: Strictly adhere to the requested practice context, category, target role, experience level, target skill, weakness, and training objective.
 2. DO NOT CHANGE THE CATEGORY: Generate a challenge that matches the requested "question_category" (e.g. project_deep_dive, behavioral, status_update, etc.).
-3. GROUND IN TARGET ROLE: Ground the scenario in the realistic workplace or interview situations of the target role (e.g. Data Analyst, Software Engineer, Manager).
-4. NO GENERIC CASUAL TOPICS FOR CAREER CONTEXTS: If the context is "interview" or "workplace", NEVER generate casual prompts like "Describe your favorite movie" or "Talk about your hobby".
-5. RESPECT THE TRAINING OBJECTIVE: Structure the prompt and instructions so that successfully speaking requires fulfilling the "training_objective".
-6. RESPECT DIFFICULTY: Calibrate scenario nuance, question depth, and time constraint to the specified difficulty level (1-5).
-7. ANTI-REPETITION: Do NOT repeat, paraphrase, or closely mimic any prompt in "avoid_prompts" or recent categories in "recent_categories".
-8. AUTHENTICITY: Make the exercise feel real (e.g., explaining a technical bottleneck, answering a tough STAR behavioral question, briefing an executive).
-9. TARGET WEAKNESS: The challenge constraints and success criteria must directly force the user to correct their "active_weakness".
-10. ZERO FABRICATION: Do not invent false personal achievements, company names, or resume facts for the user. Frame the prompt open-ended so the user speaks about their real experience.
-11. ROLE-RELEVANT COMMUNICATION: If the target role is technical (e.g. Data Analyst), focus on communicating data impact, project challenges, and analytical tradeoffs rather than writing code.
+3. GROUND IN TARGET ROLE: Ground the scenario in the realistic workplace or interview situations of the target role (e.g. Data Analyst, Software Engineer, Product Manager, Business Analyst, Consultant).
+4. RESPECT EXPERIENCE LEVEL:
+   - For "Student / Fresher": Focus on university/coursework projects, internships, academic collaborations, foundational problem-solving, and entry-level behavioral scenarios. NEVER assume enterprise management experience, cross-functional organization leadership, or years of industry history.
+   - For "0–2 Years": Focus on individual project ownership, handling ambiguity, practical debugging/analysis, and peer collaboration.
+   - For "2–5 Years": Focus on feature ownership, cross-functional alignment, and decision-making tradeoffs.
+   - For "5+ Years": Focus on strategic leadership, architectural decisions, and executive stakeholder alignment.
+5. DOMAIN ENRICHMENT: If a target domain is provided (e.g. E-commerce, Finance, Healthcare), naturally flavor the challenge with realistic domain context, without forcing unnatural jargon.
+6. NO GENERIC CASUAL TOPICS FOR CAREER CONTEXTS: If the context is "interview" or "workplace", NEVER generate casual prompts like "Describe your favorite movie" or "Talk about your hobby".
+7. RESPECT THE TRAINING OBJECTIVE: Structure the prompt and instructions so that successfully speaking requires fulfilling the "training_objective".
+8. RESPECT DIFFICULTY: Calibrate scenario nuance, question depth, and time constraint to the specified difficulty level (1-5).
+9. ANTI-REPETITION: Do NOT repeat, paraphrase, or closely mimic any prompt in "avoid_prompts" or recent categories in "recent_categories".
+10. AUTHENTICITY & ZERO FABRICATION: Do not invent false personal achievements, company names, or resume facts for the user. Frame the prompt open-ended so the user speaks about their real experience.
+11. ROLE-RELEVANT COMMUNICATION: If the target role is technical (e.g. Data Analyst or Software Engineer), focus on communicating impact, technical hurdles, and tradeoffs rather than writing code.
 12. ACTIONABLE COACHING: Provide realistic success criteria, a concise explanation in "why_this_question", and a high-leverage "coach_tip_before_start".
 
 Return STRICT JSON adhering to this schema:
@@ -251,6 +257,9 @@ Return STRICT JSON adhering to this schema:
   "challenge_type": string,
   "category": string,
   "practice_context": string,
+  "target_role": string,
+  "experience_level": string,
+  "target_domain": string,
   "target_skill": "Fluency" | "Clarity" | "Vocabulary" | "Grammar" | "Confidence",
   "target_weakness": string,
   "difficulty": number,
@@ -265,6 +274,8 @@ Return STRICT JSON adhering to this schema:
 
       const practiceContext = payload.practice_context || "interview";
       const targetRole = payload.target_role || "Student / Professional";
+      const experienceLevel = payload.experience_level || "Student / Fresher";
+      const targetDomain = payload.target_domain || "General";
       const targetSkill = payload.target_skill || payload.weakest_skill || "Clarity";
       const activeWeakness = payload.active_weakness || "unclear_structure";
       const questionCategory = payload.question_category || "project_deep_dive";
@@ -279,7 +290,9 @@ Return STRICT JSON adhering to this schema:
       const userContent = `AUTHORITATIVE TRAINING PLAN:
 - User Goal: ${payload.user_goal || payload.primary_goal || "Campus Placements / Career Growth"}
 - Practice Context: ${practiceContext}
-- Target Role / Domain: ${targetRole}
+- Target Role: ${targetRole}
+- Experience Level: ${experienceLevel}
+- Target Domain / Industry: ${targetDomain}
 - Target Skill: ${targetSkill}
 - Active Weakness: ${activeWeakness}
 - Question Category: ${questionCategory}

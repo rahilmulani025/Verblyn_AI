@@ -13,7 +13,16 @@ import { UserGoal, UserProfessionOption } from '@/features/onboarding/onboarding
 import { invalidateProfileCache } from '@/app/guards/useProfileState';
 import { useAuth } from '@/hooks/useAuth';
 import { analytics } from '@/lib/analytics';
-import { ArrowRight, Sparkles, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
+import {
+  TargetRole,
+  StandardTargetRole,
+  ExperienceLevel,
+  TargetDomain,
+  STANDARD_TARGET_ROLES,
+  EXPERIENCE_LEVEL_OPTIONS,
+  STANDARD_TARGET_DOMAINS,
+} from '@/features/personalization/personalization.types';
+import { ArrowRight, Sparkles, AlertCircle, CheckCircle2, Clock, Briefcase, GraduationCap, Compass } from 'lucide-react';
 
 const PROFESSION_OPTIONS: UserProfessionOption[] = [
   'Student',
@@ -43,8 +52,15 @@ export const OnboardingPage: React.FC = () => {
   const [institution, setInstitution] = useState('');
   const [profession, setProfession] = useState<UserProfessionOption>('Student');
 
+  // Personalization State
+  const [targetRole, setTargetRole] = useState<TargetRole>('Data Analyst');
+  const [customTargetRole, setCustomTargetRole] = useState('');
+  const [experienceLevel, setExperienceLevel] = useState<ExperienceLevel>('fresher');
+  const [targetDomain, setTargetDomain] = useState<TargetDomain>('Technology');
+
   // Validation & Submission State
   const [nameError, setNameError] = useState<string | null>(null);
+  const [roleError, setRoleError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -71,10 +87,29 @@ export const OnboardingPage: React.FC = () => {
         }
         if (data.profession === 'professional') {
           setProfession('Working Professional');
+          setExperienceLevel('0-2');
         } else if (data.profession === 'student') {
           setProfession('Student');
+          setExperienceLevel('fresher');
         } else if (data.profession === 'other') {
           setProfession('Other');
+        }
+        if (data.targetRole) {
+          if (STANDARD_TARGET_ROLES.includes(data.targetRole as StandardTargetRole)) {
+            setTargetRole(data.targetRole);
+          } else {
+            setTargetRole('Other');
+            setCustomTargetRole(data.targetRole);
+          }
+        }
+        if (data.customTargetRole) {
+          setCustomTargetRole(data.customTargetRole);
+        }
+        if (data.experienceLevel) {
+          setExperienceLevel(data.experienceLevel);
+        }
+        if (data.targetDomain) {
+          setTargetDomain(data.targetDomain);
         }
       } else if (user?.user_metadata?.full_name) {
         setFullName(user.user_metadata.full_name);
@@ -89,6 +124,15 @@ export const OnboardingPage: React.FC = () => {
 
   const handleSelectCommitment = (minutes: number) => {
     setDailyMinutes(minutes);
+  };
+
+  const handleProfessionChange = (newProf: UserProfessionOption) => {
+    setProfession(newProf);
+    if (newProf === 'Student' || newProf === 'Recent Graduate') {
+      setExperienceLevel('fresher');
+    } else if (experienceLevel === 'fresher') {
+      setExperienceLevel('0-2');
+    }
   };
 
   const handleNextStep = () => {
@@ -116,6 +160,13 @@ export const OnboardingPage: React.FC = () => {
       return;
     }
     setNameError(null);
+
+    if (targetRole === 'Other' && !customTargetRole.trim()) {
+      setRoleError('Please specify your target role');
+      return;
+    }
+    setRoleError(null);
+
     setSubmitting(true);
 
     try {
@@ -125,11 +176,17 @@ export const OnboardingPage: React.FC = () => {
         dailyCommitmentMinutes: dailyMinutes,
         institution: institution.trim() || undefined,
         profession,
+        targetRole: targetRole === 'Other' && customTargetRole.trim() ? customTargetRole.trim() : targetRole,
+        customTargetRole: targetRole === 'Other' ? customTargetRole.trim() : undefined,
+        experienceLevel,
+        targetDomain: targetDomain || undefined,
       });
 
       if (result.success) {
         analytics.track('onboarding_completed', {
           primary_goal: selectedGoal,
+          target_role: targetRole,
+          experience_level: experienceLevel,
           duration_seconds: dailyMinutes * 60,
         });
         invalidateProfileCache();
@@ -285,19 +342,19 @@ export const OnboardingPage: React.FC = () => {
             </div>
           )}
 
-          {/* STEP 3: BASIC PROFILE */}
+          {/* STEP 3: ROLE & PERSONALIZATION PROFILE */}
           {step === 3 && (
             <div className="space-y-4">
               <div className="space-y-1">
                 <h2 className="text-xl font-bold tracking-tight text-foreground">
-                  Complete your profile
+                  What are you preparing for?
                 </h2>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  We use this strictly to calibrate relevant communication scenarios for you.
+                  Verblyn tailors speaking scenarios and feedback to your target role and background.
                 </p>
               </div>
 
-              <div className="space-y-3.5">
+              <div className="space-y-4">
                 {/* Full Name */}
                 <div className="space-y-1.5">
                   <Label htmlFor="onboard-name" className="text-xs text-foreground font-medium">
@@ -320,15 +377,114 @@ export const OnboardingPage: React.FC = () => {
                   )}
                 </div>
 
-                {/* Profession / Status */}
+                {/* Target Role */}
+                <div className="space-y-2">
+                  <Label className="text-xs text-foreground font-medium flex items-center gap-1.5">
+                    <Briefcase className="w-3.5 h-3.5 text-primary" /> Target Role <span className="text-rose-400">*</span>
+                  </Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {STANDARD_TARGET_ROLES.map((role) => {
+                      const isSelected = targetRole === role;
+                      return (
+                        <button
+                          key={role}
+                          type="button"
+                          onClick={() => {
+                            setTargetRole(role);
+                            if (roleError) setRoleError(null);
+                          }}
+                          className={`px-3 py-2 rounded-xl text-xs font-semibold text-left border transition-all ${
+                            isSelected
+                              ? 'bg-primary/15 border-primary text-primary shadow-sm'
+                              : 'bg-card border-border/70 hover:border-border text-foreground/80'
+                          }`}
+                        >
+                          {role}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {targetRole === 'Other' && (
+                    <div className="pt-1 space-y-1">
+                      <Input
+                        id="onboard-custom-role"
+                        value={customTargetRole}
+                        onChange={(e) => {
+                          setCustomTargetRole(e.target.value);
+                          if (roleError) setRoleError(null);
+                        }}
+                        placeholder="Enter your target role (e.g. UX Designer, Marketing Lead)"
+                        className={`bg-card min-h-[44px] ${
+                          roleError ? 'border-rose-500 focus-visible:ring-rose-500' : 'border-border/80'
+                        }`}
+                      />
+                      {roleError && (
+                        <p className="text-[11px] text-rose-400 font-medium">{roleError}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Experience Level */}
+                <div className="space-y-2">
+                  <Label className="text-xs text-foreground font-medium flex items-center gap-1.5">
+                    <GraduationCap className="w-3.5 h-3.5 text-primary" /> Experience Level
+                  </Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {EXPERIENCE_LEVEL_OPTIONS.map((lvl) => {
+                      const isSelected = experienceLevel === lvl.id;
+                      return (
+                        <button
+                          key={lvl.id}
+                          type="button"
+                          onClick={() => setExperienceLevel(lvl.id)}
+                          className={`p-2.5 rounded-xl text-left border transition-all ${
+                            isSelected
+                              ? 'bg-primary/15 border-primary shadow-sm'
+                              : 'bg-card border-border/70 hover:border-border'
+                          }`}
+                        >
+                          <div className={`text-xs font-bold ${isSelected ? 'text-primary' : 'text-foreground'}`}>
+                            {lvl.label}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground line-clamp-1">
+                            {lvl.description}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Optional Domain / Industry */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="onboard-domain" className="text-xs text-foreground font-medium flex items-center gap-1.5">
+                    <Compass className="w-3.5 h-3.5 text-primary" /> Target Domain / Industry <span className="text-muted-foreground text-[10px]">(optional)</span>
+                  </Label>
+                  <select
+                    id="onboard-domain"
+                    value={targetDomain}
+                    onChange={(e) => setTargetDomain(e.target.value as TargetDomain)}
+                    className="w-full min-h-[44px] px-3 rounded-md bg-card border border-border/80 text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    {STANDARD_TARGET_DOMAINS.map((domain) => (
+                      <option key={domain} value={domain}>
+                        {domain}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Status / Current Background */}
                 <div className="space-y-1.5">
                   <Label htmlFor="onboard-prof" className="text-xs text-foreground font-medium">
-                    Current Status / Profession
+                    Current Status
                   </Label>
                   <select
                     id="onboard-prof"
                     value={profession}
-                    onChange={(e) => setProfession(e.target.value as UserProfessionOption)}
+                    onChange={(e) => handleProfessionChange(e.target.value as UserProfessionOption)}
                     className="w-full min-h-[44px] px-3 rounded-md bg-card border border-border/80 text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-primary"
                   >
                     {PROFESSION_OPTIONS.map((opt) => (
@@ -342,7 +498,7 @@ export const OnboardingPage: React.FC = () => {
                 {/* Institution */}
                 <div className="space-y-1.5">
                   <Label htmlFor="onboard-inst" className="text-xs text-foreground font-medium">
-                    College / University / Company <span className="text-muted-foreground">(optional)</span>
+                    College / University / Company <span className="text-muted-foreground text-[10px]">(optional)</span>
                   </Label>
                   <Input
                     id="onboard-inst"

@@ -6,6 +6,63 @@ import { TargetSkill } from '@/features/challenges/challenge.types';
 
 export type PracticeContext = 'interview' | 'workplace' | 'public_speaking' | 'everyday';
 
+export type StandardTargetRole =
+  | 'Data Analyst'
+  | 'Data Scientist'
+  | 'Software Engineer'
+  | 'Product Manager'
+  | 'Business Analyst'
+  | 'Consultant'
+  | 'Other';
+
+export const STANDARD_TARGET_ROLES: StandardTargetRole[] = [
+  'Data Analyst',
+  'Data Scientist',
+  'Software Engineer',
+  'Product Manager',
+  'Business Analyst',
+  'Consultant',
+  'Other',
+];
+
+export type TargetRole = StandardTargetRole | string;
+
+export type ExperienceLevel = 'fresher' | '0-2' | '2-5' | '5+';
+
+export interface ExperienceLevelOption {
+  id: ExperienceLevel;
+  label: string;
+  description: string;
+}
+
+export const EXPERIENCE_LEVEL_OPTIONS: ExperienceLevelOption[] = [
+  { id: 'fresher', label: 'Student / Fresher', description: 'Projects, internships, fundamentals' },
+  { id: '0-2', label: '0–2 Years', description: 'Project ownership & practical problem solving' },
+  { id: '2-5', label: '2–5 Years', description: 'Cross-functional ownership & leadership' },
+  { id: '5+', label: '5+ Years', description: 'Strategic leadership & complex decisions' },
+];
+
+export type StandardTargetDomain =
+  | 'Technology'
+  | 'Finance'
+  | 'Healthcare'
+  | 'Consulting'
+  | 'Marketing'
+  | 'E-commerce'
+  | 'Other';
+
+export const STANDARD_TARGET_DOMAINS: StandardTargetDomain[] = [
+  'Technology',
+  'Finance',
+  'Healthcare',
+  'Consulting',
+  'Marketing',
+  'E-commerce',
+  'Other',
+];
+
+export type TargetDomain = StandardTargetDomain | string;
+
 export type InterviewCategory =
   | 'hr'
   | 'behavioral'
@@ -51,9 +108,11 @@ export interface UserPersonalizationState {
   fullName?: string;
   profession?: string;
   institution?: string;
-  experienceLevel?: 'fresher' | 'mid' | 'senior' | 'executive';
   primaryGoal?: string;
-  targetRole?: string;
+  targetRole?: TargetRole;
+  customTargetRole?: string;
+  experienceLevel?: ExperienceLevel;
+  targetDomain?: TargetDomain;
   targetIndustry?: string;
   skills: Record<TargetSkill, number>;
   activeWeaknesses: Array<{
@@ -76,6 +135,9 @@ export interface UserPersonalizationState {
 export interface TrainingPlan {
   practiceContext: PracticeContext;
   targetRole: string;
+  experienceLevel: ExperienceLevel;
+  experienceLevelLabel: string;
+  targetDomain?: string;
   targetSkill: TargetSkill;
   targetWeakness?: string;
   questionCategory: QuestionCategory;
@@ -92,6 +154,9 @@ export interface PersonalizedTopicResult {
   question: string;
   category: QuestionCategory;
   practice_context: PracticeContext;
+  target_role: string;
+  experience_level?: string;
+  target_domain?: string;
   difficulty: number;
   target_skill: TargetSkill;
   target_weakness?: string;

@@ -58,13 +58,37 @@ export const personalizationApi = {
         score: s.score,
       }));
 
+      // Resolve effective target role (custom text if Other)
+      let resolvedRole: string | undefined = undefined;
+      if (profile?.targetRole) {
+        if (profile.targetRole === 'Other' && profile.customTargetRole?.trim()) {
+          resolvedRole = profile.customTargetRole.trim();
+        } else {
+          resolvedRole = profile.targetRole;
+        }
+      } else if (profile?.profession === 'student') {
+        resolvedRole = 'Campus Placement Candidate';
+      } else if (profile?.profession) {
+        resolvedRole = profile.profession;
+      }
+
+      // Resolve experience level (defaults: student -> fresher, else 0-2)
+      const resolvedExperienceLevel =
+        profile?.experienceLevel ||
+        (profile?.profession === 'student' ? 'fresher' : '0-2');
+
+      const resolvedDomain = profile?.targetDomain || undefined;
+
       return {
         userId: user.id,
         fullName: profile?.fullName || undefined,
         profession: profile?.profession || undefined,
         institution: profile?.institution || undefined,
         primaryGoal: profile?.primaryGoal || undefined,
-        targetRole: profile?.profession === 'student' ? 'Campus Placement Candidate' : profile?.profession || undefined,
+        targetRole: resolvedRole,
+        customTargetRole: profile?.customTargetRole || undefined,
+        experienceLevel: resolvedExperienceLevel,
+        targetDomain: resolvedDomain,
         skills: skillsRecord,
         activeWeaknesses,
         recentAttempts,

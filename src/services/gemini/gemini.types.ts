@@ -120,16 +120,23 @@ export interface TranscribeAudioResult {
 }
 
 export interface GenerateTopicPayload {
+  user_goal?: string;
   primary_goal?: string;
+  practice_context?: string;
   target_role?: string;
-  active_weakness?: string;
+  experience_level?: string;
+  target_domain?: string;
+  target_skill?: TargetSkill | string;
   weakest_skill?: string;
+  active_weakness?: string;
+  question_category?: string;
+  difficulty?: number;
   current_level?: number;
   template_type?: string;
-  practice_context?: string;
-  question_category?: string;
   training_objective?: string;
+  time_limit_seconds?: number;
   recent_prompts?: string[];
+  avoid_prompts?: string[];
   recent_categories?: string[];
 }
 

@@ -84,6 +84,25 @@ export const profileApi = {
         row?.primary_goal ||
         (typeof meta.primary_goal === 'string' ? meta.primary_goal : null);
 
+      const targetRole =
+        (typeof meta.target_role === 'string' ? meta.target_role : null) ||
+        (row as unknown as Record<string, unknown>)?.target_role as string ||
+        null;
+
+      const customTargetRole =
+        (typeof meta.custom_target_role === 'string' ? meta.custom_target_role : null) ||
+        null;
+
+      const experienceLevel =
+        (typeof meta.experience_level === 'string' ? meta.experience_level : null) ||
+        (row as unknown as Record<string, unknown>)?.experience_level as string ||
+        (row?.profession === 'student' ? 'fresher' : null);
+
+      const targetDomain =
+        (typeof meta.target_domain === 'string' ? meta.target_domain : null) ||
+        (row as unknown as Record<string, unknown>)?.target_domain as string ||
+        null;
+
       if (!row) {
         return {
           id: userId,
@@ -97,6 +116,10 @@ export const profileApi = {
           baselineCompleted,
           dailyGoalMinutes: Number(meta.daily_goal_minutes) || 5,
           primaryGoal,
+          targetRole,
+          customTargetRole,
+          experienceLevel: experienceLevel as UserProfile['experienceLevel'],
+          targetDomain,
           communicationStyleFocus: Array.isArray(meta.communication_focus) ? meta.communication_focus : [],
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -115,6 +138,10 @@ export const profileApi = {
         baselineCompleted,
         dailyGoalMinutes: Number(row.daily_goal_minutes || meta.daily_goal_minutes || 5),
         primaryGoal,
+        targetRole,
+        customTargetRole,
+        experienceLevel: experienceLevel as UserProfile['experienceLevel'],
+        targetDomain,
         communicationStyleFocus:
           row.communication_focus ||
           (Array.isArray(meta.communication_focus) ? meta.communication_focus : []),
@@ -165,13 +192,17 @@ export const profileApi = {
         });
       }
 
-      // 3. Sync extended onboarding/goal flags to auth metadata
+      // 3. Sync extended onboarding/goal flags & personalization to auth metadata
       const metaUpdate: Record<string, unknown> = {};
       if (input.fullName !== undefined) metaUpdate.full_name = input.fullName;
       if (input.onboardingCompleted !== undefined) metaUpdate.onboarding_completed = input.onboardingCompleted;
       if (input.baselineCompleted !== undefined) metaUpdate.baseline_completed = input.baselineCompleted;
       if (input.dailyGoalMinutes !== undefined) metaUpdate.daily_goal_minutes = input.dailyGoalMinutes;
       if (input.primaryGoal !== undefined) metaUpdate.primary_goal = input.primaryGoal;
+      if (input.targetRole !== undefined) metaUpdate.target_role = input.targetRole;
+      if (input.customTargetRole !== undefined) metaUpdate.custom_target_role = input.customTargetRole;
+      if (input.experienceLevel !== undefined) metaUpdate.experience_level = input.experienceLevel;
+      if (input.targetDomain !== undefined) metaUpdate.target_domain = input.targetDomain;
       if (input.communicationStyleFocus !== undefined) metaUpdate.communication_focus = input.communicationStyleFocus;
 
       if (Object.keys(metaUpdate).length > 0) {
