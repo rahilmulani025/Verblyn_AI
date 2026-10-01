@@ -42,6 +42,9 @@ export interface PersonalizedChallenge {
   practice_context?: string;
   training_objective?: string;
   why_this_question?: string;
+  adaptive_state?: string;
+  scaffolding_level?: string;
+  reason_for_next_challenge?: string;
   follow_up_question?: string;
   coach_tip_before_start: string;
 }
@@ -134,6 +137,9 @@ export interface GenerateTopicPayload {
   current_level?: number;
   template_type?: string;
   training_objective?: string;
+  adaptive_state?: string;
+  scaffolding_level?: string;
+  reason_for_next_challenge?: string;
   time_limit_seconds?: number;
   recent_prompts?: string[];
   avoid_prompts?: string[];

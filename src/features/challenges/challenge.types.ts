@@ -111,6 +111,11 @@ export interface NextRecommendation {
   targetSkill: TargetSkill;
   reason: string;
   targetedWeakness?: string;
+  adaptiveState?: string;
+  difficulty?: number;
+  scaffoldingLevel?: string;
+  whyThisNext?: string;
+  category?: string;
 }
 
 export interface ChallengeAttempt {

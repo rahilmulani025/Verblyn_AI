@@ -103,6 +103,15 @@ export type QuestionCategory =
   | PublicSpeakingCategory
   | EverydayCategory;
 
+export type AdaptiveState =
+  | 'CONTINUE_REINFORCEMENT'
+  | 'PROGRESS'
+  | 'STAGNATION'
+  | 'RECOVERY'
+  | 'MASTERED';
+
+export type ScaffoldingLevel = 'high' | 'medium' | 'low';
+
 export interface UserPersonalizationState {
   userId: string;
   fullName?: string;
@@ -121,6 +130,7 @@ export interface UserPersonalizationState {
     skillName: string;
     severity?: 'low' | 'medium' | 'high';
     occurrenceCount?: number;
+    status?: 'ACTIVE' | 'IMPROVING' | 'RESOLVED';
   }>;
   recentAttempts: Array<{
     challengeId: string;
@@ -129,6 +139,7 @@ export interface UserPersonalizationState {
     category?: string;
     completedAt?: string;
     score?: number;
+    difficulty?: number;
   }>;
 }
 
@@ -145,6 +156,10 @@ export interface TrainingPlan {
   difficulty: number; // 1 to 5
   difficultyLabel: 'Beginner' | 'Intermediate' | 'Advanced';
   timeLimitSeconds: number;
+  adaptiveState: AdaptiveState;
+  adaptiveStateLabel: string;
+  scaffoldingLevel: ScaffoldingLevel;
+  reasonForNextChallenge: string;
   avoidRecentPrompts: string[];
   avoidRecentCategories: string[];
 }
@@ -158,6 +173,9 @@ export interface PersonalizedTopicResult {
   experience_level?: string;
   target_domain?: string;
   difficulty: number;
+  adaptive_state?: AdaptiveState;
+  scaffolding_level?: ScaffoldingLevel;
+  reason_for_next_challenge?: string;
   target_skill: TargetSkill;
   target_weakness?: string;
   training_objective: string;

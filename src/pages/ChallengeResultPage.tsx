@@ -361,19 +361,45 @@ export const ChallengeResultPage: React.FC = () => {
             </Card>
           )}
 
-          {/* RECOMMENDED NEXT DRILL */}
-          <Card className="border border-primary/40 bg-card">
-            <CardContent className="p-3.5 space-y-2">
+          {/* ADAPTIVE NEXT FOCUS & WHY THIS NEXT */}
+          <Card className="border border-primary/50 bg-gradient-to-br from-primary/10 via-card to-card shadow-sm">
+            <CardContent className="p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-primary uppercase tracking-wider">
-                  Recommended Next Drill
-                </span>
-                <span className="text-xs px-2 py-0.5 rounded-md bg-secondary text-foreground font-semibold">
-                  {recommendation.targetSkill}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <Target className="w-4 h-4 text-primary" />
+                  <span className="text-[11px] font-bold text-primary uppercase tracking-wider">
+                    Next Focus
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {recommendation.adaptiveState && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/15 text-primary font-semibold border border-primary/30">
+                      {recommendation.adaptiveState.replace(/_/g, ' ')}
+                    </span>
+                  )}
+                  <span className="text-xs px-2 py-0.5 rounded-md bg-secondary text-foreground font-semibold">
+                    {recommendation.targetSkill}
+                  </span>
+                </div>
               </div>
-              <h4 className="text-sm font-bold text-foreground">{recommendation.nextChallengeTitle}</h4>
-              <p className="text-xs text-muted-foreground leading-relaxed">{recommendation.reason}</p>
+
+              <div>
+                <h4 className="text-sm font-bold text-foreground">{recommendation.nextChallengeTitle}</h4>
+                {recommendation.difficulty && (
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Level {recommendation.difficulty} · {recommendation.scaffoldingLevel ? `${recommendation.scaffoldingLevel.toUpperCase()} GUIDANCE` : 'STRUCTURED'}
+                  </p>
+                )}
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-secondary/50 border border-border/60 space-y-1">
+                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                  Why This Next
+                </span>
+                <p className="text-xs text-foreground/90 font-medium leading-relaxed">
+                  {recommendation.whyThisNext || recommendation.reason}
+                </p>
+              </div>
             </CardContent>
           </Card>
 

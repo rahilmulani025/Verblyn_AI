@@ -9,6 +9,7 @@ import {
   TargetSkill,
 } from './challenge.types';
 import { profileApi } from '@/features/profile/profile.api';
+import { trainingPolicy } from '@/features/personalization/trainingPolicy';
 
 import { Tables } from '@/integrations/supabase/types';
 
@@ -275,12 +276,68 @@ export const challengeApi = {
     currentChallengeId: string,
     scores?: ChallengeScoreBreakdown,
     primaryGoal?: string,
-    activeWeakness?: { type: string; skill?: string; confidence?: number; evidence?: string }
+    activeWeakness?: { type: string; skill?: string; confidence?: number; evidence?: string; status?: 'ACTIVE' | 'IMPROVING' | 'RESOLVED'; occurrenceCount?: number },
+    experienceLevel: import('@/features/personalization/personalization.types').ExperienceLevel = '0-2'
   ): NextRecommendation {
     const current = CHALLENGE_CATALOG.find((c) => c.id === currentChallengeId);
 
+    // Derive deterministic adaptive state from attempt scores
+    const overallScore = scores?.overallScore || 75;
+    const currentSkillScores: Record<TargetSkill, number> = {
+      Fluency: scores?.fluency || 70,
+      Clarity: scores?.clarity || 70,
+      Vocabulary: scores?.vocabulary || 70,
+      Grammar: scores?.grammar || 70,
+      Confidence: scores?.confidence || 70,
+    };
+
+    let targetSkill: TargetSkill = 'Clarity';
+    const targetWeakness: string | undefined = activeWeakness?.type;
+
+    if (activeWeakness?.skill) {
+      targetSkill = activeWeakness.skill as TargetSkill;
+    } else if (scores) {
+      let lowestScore = 100;
+      for (const [s, val] of Object.entries(currentSkillScores) as Array<[TargetSkill, number]>) {
+        if (val < lowestScore) {
+          lowestScore = val;
+          targetSkill = s;
+        }
+      }
+    }
+
+    const pseudoState = {
+      userId: 'active_recommendation',
+      primaryGoal,
+      skills: currentSkillScores,
+      activeWeaknesses: activeWeakness ? [{
+        type: activeWeakness.type,
+        label: activeWeakness.type.replace(/_/g, ' '),
+        skillName: targetSkill,
+        occurrenceCount: activeWeakness.occurrenceCount || 1,
+        status: activeWeakness.status || 'ACTIVE',
+      }] : [],
+      recentAttempts: [{
+        challengeId: currentChallengeId,
+        title: current?.title || 'Current Challenge',
+        targetSkill,
+        score: overallScore,
+        category: current?.challengeType,
+      }],
+    };
+
+    const adaptiveState = trainingPolicy.determineAdaptiveState(pseudoState, targetSkill, activeWeakness ? {
+      type: activeWeakness.type,
+      status: activeWeakness.status || 'ACTIVE',
+      occurrenceCount: activeWeakness.occurrenceCount || 1,
+    } : undefined);
+
+    const baseDiff = current?.difficultyLevel || 2;
+    const { difficulty } = trainingPolicy.adjustDifficulty(baseDiff, adaptiveState, experienceLevel);
+    const scaffoldingLevel = trainingPolicy.calculateScaffolding(adaptiveState, difficulty, experienceLevel, overallScore);
+
     // 1. Priority 1 & 2: Active Weakness Match with Exercise Format Rotation
-    if (activeWeakness && activeWeakness.type) {
+    if (activeWeakness && activeWeakness.type && adaptiveState !== 'MASTERED') {
       const normalizedWeakness = activeWeakness.type.toLowerCase().trim();
       const weaknessMatches = CHALLENGE_CATALOG.filter(
         (c) =>
@@ -296,13 +353,27 @@ export const challengeApi = {
         const differentFormat = weaknessMatches.find((c) => c.challengeType !== current?.challengeType);
         const selectedMatch = differentFormat || weaknessMatches[0];
 
-        const weaknessLabel = activeWeakness.type.replace(/_/g, ' ');
+        const whyThisNext = trainingPolicy.synthesizeWhyThisNext(
+          adaptiveState,
+          selectedMatch.targetSkill,
+          activeWeakness.type,
+          undefined,
+          overallScore,
+          scaffoldingLevel,
+          difficulty
+        );
+
         return {
           nextChallengeId: selectedMatch.id,
           nextChallengeTitle: selectedMatch.title,
           targetSkill: selectedMatch.targetSkill,
           targetedWeakness: activeWeakness.type,
-          reason: `Your recent evidence detected "${weaknessLabel}". This targeted drill focuses on correcting that pattern.`,
+          adaptiveState,
+          difficulty,
+          scaffoldingLevel,
+          whyThisNext,
+          category: selectedMatch.challengeType,
+          reason: whyThisNext,
         };
       }
     }
@@ -328,18 +399,34 @@ export const challengeApi = {
       }
     }
 
-    if (lowestScore < 75) {
+    if (lowestScore < 75 || adaptiveState === 'MASTERED' || adaptiveState === 'PROGRESS') {
       const skillMatches = CHALLENGE_CATALOG.filter(
         (c) => c.id !== currentChallengeId && c.targetSkill === lowestSkill
       );
       if (skillMatches.length > 0) {
         const differentFormat = skillMatches.find((c) => c.challengeType !== current?.challengeType);
         const selectedMatch = differentFormat || skillMatches[0];
+
+        const whyThisNext = trainingPolicy.synthesizeWhyThisNext(
+          adaptiveState,
+          lowestSkill,
+          undefined,
+          undefined,
+          overallScore,
+          scaffoldingLevel,
+          difficulty
+        );
+
         return {
           nextChallengeId: selectedMatch.id,
           nextChallengeTitle: selectedMatch.title,
           targetSkill: selectedMatch.targetSkill,
-          reason: `Your ${lowestSkill.toLowerCase()} score (${lowestScore}%) was your lowest area. This drill directly targets ${lowestSkill.toLowerCase()} growth.`,
+          adaptiveState,
+          difficulty,
+          scaffoldingLevel,
+          whyThisNext,
+          category: selectedMatch.challengeType,
+          reason: whyThisNext,
         };
       }
     }
@@ -352,11 +439,27 @@ export const challengeApi = {
       if (goalMatches.length > 0) {
         const differentFormat = goalMatches.find((c) => c.challengeType !== current?.challengeType);
         const selectedMatch = differentFormat || goalMatches[0];
+
+        const whyThisNext = trainingPolicy.synthesizeWhyThisNext(
+          adaptiveState,
+          selectedMatch.targetSkill,
+          undefined,
+          undefined,
+          overallScore,
+          scaffoldingLevel,
+          difficulty
+        );
+
         return {
           nextChallengeId: selectedMatch.id,
           nextChallengeTitle: selectedMatch.title,
           targetSkill: selectedMatch.targetSkill,
-          reason: `Tailored for your primary track in ${primaryGoal.replace(/_/g, ' ').toLowerCase()}.`,
+          adaptiveState,
+          difficulty,
+          scaffoldingLevel,
+          whyThisNext,
+          category: selectedMatch.challengeType,
+          reason: whyThisNext,
         };
       }
     }
@@ -367,25 +470,56 @@ export const challengeApi = {
         (c) =>
           c.id !== currentChallengeId &&
           c.targetSkill === current.targetSkill &&
-          c.difficultyLevel >= current.difficultyLevel
+          c.difficultyLevel >= difficulty
       );
       if (nextLevelMatch) {
+        const whyThisNext = trainingPolicy.synthesizeWhyThisNext(
+          adaptiveState,
+          nextLevelMatch.targetSkill,
+          undefined,
+          undefined,
+          overallScore,
+          scaffoldingLevel,
+          difficulty
+        );
+
         return {
           nextChallengeId: nextLevelMatch.id,
           nextChallengeTitle: nextLevelMatch.title,
           targetSkill: nextLevelMatch.targetSkill,
-          reason: `Great job on ${current.title}. Step up to ${nextLevelMatch.title} to lock in your ${current.targetSkill.toLowerCase()} gains.`,
+          adaptiveState,
+          difficulty,
+          scaffoldingLevel,
+          whyThisNext,
+          category: nextLevelMatch.challengeType,
+          reason: whyThisNext,
         };
       }
     }
 
     // 5. Fallback Balanced Challenge
     const nextItem = CHALLENGE_CATALOG.find((c) => c.id !== currentChallengeId) || CHALLENGE_CATALOG[1];
+    const fallbackWhy = trainingPolicy.synthesizeWhyThisNext(
+      adaptiveState,
+      nextItem.targetSkill,
+      undefined,
+      undefined,
+      overallScore,
+      scaffoldingLevel,
+      difficulty
+    );
+
     return {
       nextChallengeId: nextItem.id,
       nextChallengeTitle: nextItem.title,
       targetSkill: nextItem.targetSkill,
-      reason: 'Continue building well-rounded conversational stamina with this drill.',
+      adaptiveState,
+      difficulty,
+      scaffoldingLevel,
+      whyThisNext: fallbackWhy,
+      category: nextItem.challengeType,
+      reason: fallbackWhy,
     };
   },
 };
+

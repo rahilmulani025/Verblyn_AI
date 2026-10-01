@@ -1,12 +1,12 @@
 /**
- * Deterministic Training Policy Layer for Verblyn AI (Phase 3: User-Controlled Personalization)
+ * Deterministic Training Policy Layer for Verblyn AI (Phase 4: Adaptive Training Engine)
  * 
  * CORE PRINCIPLE:
- * VERBLYN decides WHAT the user should practice (Context, Category, Target Skill, Weakness, Difficulty, Objective).
+ * VERBLYN decides WHAT the user should practice based on what just happened in their previous attempt.
  * GEMINI decides HOW to naturally phrase the exercise.
  * 
- * POLICY HIERARCHY:
- * GOAL -> PRACTICE CONTEXT -> TARGET ROLE -> EXPERIENCE LEVEL -> CURRENT WEAKNESS -> TARGET SKILL -> QUESTION CATEGORY -> TRAINING OBJECTIVE -> DIFFICULTY -> ANTI-REPETITION -> GEMINI
+ * ADAPTIVE LOOP:
+ * USER PROFILE / STATE -> ATTEMPT ANALYSIS -> ADAPTIVE DECISION (State, Difficulty, Scaffolding, Reason) -> AUTHORITATIVE PLAN -> GEMINI / NEXT CHALLENGE
  */
 
 import { TargetSkill } from '@/features/challenges/challenge.types';
@@ -21,6 +21,8 @@ import {
   EverydayCategory,
   ExperienceLevel,
   EXPERIENCE_LEVEL_OPTIONS,
+  AdaptiveState,
+  ScaffoldingLevel,
 } from './personalization.types';
 
 const CONTEXT_MAP: Record<string, PracticeContext> = {
@@ -84,6 +86,26 @@ export const trainingPolicy = {
   resolveExperienceLabel(level?: ExperienceLevel): string {
     const found = EXPERIENCE_LEVEL_OPTIONS.find((opt) => opt.id === level);
     return found ? found.label : '0–2 Years';
+  },
+
+  /**
+   * Resolves user-friendly label for an adaptive state.
+   */
+  resolveAdaptiveStateLabel(state: AdaptiveState): string {
+    switch (state) {
+      case 'CONTINUE_REINFORCEMENT':
+        return 'Targeted Reinforcement';
+      case 'PROGRESS':
+        return 'Skill Progression';
+      case 'STAGNATION':
+        return 'Technique Shift';
+      case 'RECOVERY':
+        return 'Foundational Recovery';
+      case 'MASTERED':
+        return 'Skill Mastery & Transition';
+      default:
+        return 'Personalized Focus';
+    }
   },
 
   /**
@@ -154,6 +176,184 @@ export const trainingPolicy = {
     const available = pool.filter((cat) => !recentSet.has(cat.toLowerCase()));
 
     return available.length > 0 ? available[0] : pool[0];
+  },
+
+  /**
+   * Evaluates recent performance trend and active weakness persistence
+   * to determine the deterministic Adaptive State.
+   */
+  determineAdaptiveState(
+    state: UserPersonalizationState,
+    targetSkill: TargetSkill,
+    activeWeaknessObj?: { type: string; status?: 'ACTIVE' | 'IMPROVING' | 'RESOLVED'; occurrenceCount?: number }
+  ): AdaptiveState {
+    const recent = state.recentAttempts || [];
+    const latestAttempt = recent[0];
+    const previousAttempt = recent[1];
+
+    const latestScore = latestAttempt?.score;
+    const previousScore = previousAttempt?.score;
+    const currentSkillScore = state.skills[targetSkill] || 70;
+
+    // 1. RECOVERY: Significant score drop (> 15 points) or very low attempt score (< 55)
+    if (latestScore !== undefined) {
+      if (latestScore < 55) {
+        return 'RECOVERY';
+      }
+      if (previousScore !== undefined && latestScore - previousScore <= -15) {
+        return 'RECOVERY';
+      }
+    }
+
+    // 2. MASTERED: Weakness explicitly RESOLVED, or recent attempt demonstrated mastery (score >= 82, skill >= 80, without active unresolved weakness)
+    if (state.activeWeaknesses?.some((w) => w.status === 'RESOLVED')) {
+      return 'MASTERED';
+    }
+    const evaluatedSkill = (latestAttempt?.targetSkill as TargetSkill) || targetSkill;
+    const evaluatedSkillScore = state.skills[evaluatedSkill] || currentSkillScore;
+    if (
+      latestScore !== undefined &&
+      latestScore >= 82 &&
+      evaluatedSkillScore >= 80 &&
+      (!activeWeaknessObj || activeWeaknessObj.status === 'RESOLVED')
+    ) {
+      return 'MASTERED';
+    }
+
+    // 3. PROGRESS: Notable score improvement (>= 75 score or steady upward progression)
+    if (latestScore !== undefined && latestScore >= 75) {
+      return 'PROGRESS';
+    }
+    if (
+      latestScore !== undefined &&
+      previousScore !== undefined &&
+      latestScore - previousScore >= 8 &&
+      latestScore >= 70
+    ) {
+      return 'PROGRESS';
+    }
+
+    // 4. STAGNATION: 2+ recent attempts on same skill with plateaued scores (< 70, delta < 5)
+    if (recent.length >= 2) {
+      const sameSkillAttempts = recent.filter(
+        (a) => a.targetSkill?.toLowerCase() === targetSkill.toLowerCase() || !a.targetSkill
+      );
+      if (sameSkillAttempts.length >= 2) {
+        const s1 = sameSkillAttempts[0]?.score || 65;
+        const s2 = sameSkillAttempts[1]?.score || 65;
+        if (s1 < 70 && s2 < 70 && Math.abs(s1 - s2) <= 5) {
+          return 'STAGNATION';
+        }
+      }
+    }
+
+    // 5. CONTINUE_REINFORCEMENT: Active weakness remains or user is reinforcing the skill
+    return 'CONTINUE_REINFORCEMENT';
+  },
+
+  /**
+   * Determines the appropriate scaffolding level based on adaptive state,
+   * difficulty, and experience level.
+   */
+  calculateScaffolding(
+    adaptiveState: AdaptiveState,
+    difficulty: number,
+    experienceLevel: ExperienceLevel,
+    latestScore?: number
+  ): ScaffoldingLevel {
+    if (adaptiveState === 'RECOVERY') {
+      return 'high';
+    }
+    if (adaptiveState === 'MASTERED') {
+      return 'low';
+    }
+    if (adaptiveState === 'PROGRESS') {
+      return difficulty >= 4 || (latestScore !== undefined && latestScore >= 80) ? 'low' : 'medium';
+    }
+    if (adaptiveState === 'STAGNATION') {
+      return 'medium';
+    }
+
+    // CONTINUE_REINFORCEMENT
+    if (experienceLevel === 'fresher' || (latestScore !== undefined && latestScore < 65)) {
+      return 'high';
+    }
+    return 'medium';
+  },
+
+  /**
+   * Adjusts difficulty based on adaptive state while respecting bounds [1, 5].
+   */
+  adjustDifficulty(
+    baseDifficulty: number,
+    adaptiveState: AdaptiveState,
+    experienceLevel: ExperienceLevel
+  ): { difficulty: number; difficultyLabel: 'Beginner' | 'Intermediate' | 'Advanced' } {
+    let diff = baseDifficulty;
+
+    switch (adaptiveState) {
+      case 'RECOVERY':
+        diff = Math.max(1, baseDifficulty - 1);
+        break;
+      case 'PROGRESS':
+        diff = Math.min(5, baseDifficulty + 1);
+        break;
+      case 'MASTERED':
+        diff = experienceLevel === '5+' ? 4 : Math.min(5, Math.max(3, baseDifficulty + 1));
+        break;
+      case 'STAGNATION':
+      case 'CONTINUE_REINFORCEMENT':
+      default:
+        diff = Math.max(1, Math.min(5, baseDifficulty));
+        break;
+    }
+
+    let difficultyLabel: 'Beginner' | 'Intermediate' | 'Advanced' = 'Intermediate';
+    if (diff <= 1) {
+      difficultyLabel = 'Beginner';
+    } else if (diff >= 4) {
+      difficultyLabel = 'Advanced';
+    } else {
+      difficultyLabel = 'Intermediate';
+    }
+
+    return { difficulty: diff, difficultyLabel };
+  },
+
+  /**
+   * Deterministically synthesizes an explainable, coach-like reason for the next challenge.
+   */
+  synthesizeWhyThisNext(
+    adaptiveState: AdaptiveState,
+    targetSkill: TargetSkill,
+    targetWeakness?: string,
+    category?: QuestionCategory,
+    latestScore?: number,
+    scaffoldingLevel: ScaffoldingLevel = 'medium',
+    difficulty = 2
+  ): string {
+    const weaknessLabel = targetWeakness ? targetWeakness.replace(/_/g, ' ') : targetSkill.toLowerCase();
+    const categoryLabel = category ? category.replace(/_/g, ' ') : 'targeted drill';
+
+    switch (adaptiveState) {
+      case 'RECOVERY':
+        return latestScore !== undefined
+          ? `Your performance dipped to ${latestScore}% on the last attempt. This exercise temporarily reduces difficulty to Level ${difficulty} with step-by-step guidance to rebuild your core structure.`
+          : `This exercise temporarily reduces difficulty to rebuild your fundamentals with high structure guidance.`;
+
+      case 'PROGRESS':
+        return `Your ${targetSkill.toLowerCase()} score improved${latestScore ? ` (${latestScore}%)` : ''}. This challenge steps up to Level ${difficulty} with ${scaffoldingLevel} guidance to test your autonomy.`;
+
+      case 'STAGNATION':
+        return `Your recent attempts on ${targetSkill.toLowerCase()} plateaued. We're switching to a ${categoryLabel} format to practice the same skill from a fresh angle while keeping difficulty steady.`;
+
+      case 'MASTERED':
+        return `You've demonstrated consistent mastery in ${weaknessLabel}${latestScore ? ` (${latestScore}%)` : ''}. We're advancing your focus to the next developmental skill with realistic, unstructured scenarios.`;
+
+      case 'CONTINUE_REINFORCEMENT':
+      default:
+        return `Your last response showed progress, but ${weaknessLabel} still needs reinforcement. This ${categoryLabel} drill keeps the focus sharp while varying the interview scenario.`;
+    }
   },
 
   /**
@@ -296,7 +496,7 @@ export const trainingPolicy = {
   },
 
   /**
-   * Evaluates user personalization state and produces an authoritative TrainingPlan.
+   * Evaluates user personalization state and produces an authoritative, adaptive TrainingPlan.
    */
   generateTrainingPlan(state: UserPersonalizationState): TrainingPlan {
     // 1. Resolve Practice Context
@@ -320,13 +520,28 @@ export const trainingPolicy = {
     // 4. Identify Target Domain
     const targetDomain = state.targetDomain || undefined;
 
-    // 5. Identify Primary Weakness & Target Skill
-    const activeWeakness = state.activeWeaknesses[0];
-    const targetWeakness: string | undefined = activeWeakness?.type;
+    // 5. Weakness Priority & Persistence Rule:
+    // Sort active weaknesses: ACTIVE > IMPROVING > RESOLVED, then by occurrenceCount (3+ highest priority), then severity.
+    const sortedWeaknesses = [...(state.activeWeaknesses || [])].sort((a, b) => {
+      const statusWeight = (s?: string) => (s === 'ACTIVE' ? 3 : s === 'IMPROVING' ? 2 : 1);
+      const wA = statusWeight(a.status);
+      const wB = statusWeight(b.status);
+      if (wA !== wB) return wB - wA;
+
+      const occA = a.occurrenceCount || 1;
+      const occB = b.occurrenceCount || 1;
+      if (occA !== occB) return occB - occA;
+
+      const sevWeight = (s?: string) => (s === 'high' ? 3 : s === 'medium' ? 2 : 1);
+      return sevWeight(b.severity) - sevWeight(a.severity);
+    });
+
+    const activeWeaknessObj = sortedWeaknesses[0];
+    let targetWeakness: string | undefined = activeWeaknessObj?.type;
     let targetSkill: TargetSkill = 'Clarity';
 
-    if (activeWeakness && activeWeakness.skillName) {
-      targetSkill = activeWeakness.skillName as TargetSkill;
+    if (activeWeaknessObj && activeWeaknessObj.skillName) {
+      targetSkill = activeWeaknessObj.skillName as TargetSkill;
     } else {
       // Find lowest score among all 5 skills
       let lowestScore = 100;
@@ -339,48 +554,76 @@ export const trainingPolicy = {
       }
     }
 
-    // 6. Determine Difficulty from Skill Ratings & Experience Level (1 to 5)
-    const currentSkillScore = state.skills[targetSkill] || 70;
-    let difficulty = 2;
-    let difficultyLabel: 'Beginner' | 'Intermediate' | 'Advanced' = 'Intermediate';
+    // 6. Deterministic Adaptive State Determination
+    const adaptiveState = this.determineAdaptiveState(state, targetSkill, activeWeaknessObj);
+    const adaptiveStateLabel = this.resolveAdaptiveStateLabel(adaptiveState);
 
-    if (experienceLevel === 'fresher') {
-      if (currentSkillScore >= 85) {
-        difficulty = 3;
-        difficultyLabel = 'Intermediate';
-      } else if (currentSkillScore <= 60) {
-        difficulty = 1;
-        difficultyLabel = 'Beginner';
-      } else {
-        difficulty = 2;
-        difficultyLabel = 'Intermediate';
-      }
-    } else if (experienceLevel === '5+') {
-      if (currentSkillScore >= 75) {
-        difficulty = 4;
-        difficultyLabel = 'Advanced';
-      } else {
-        difficulty = 3;
-        difficultyLabel = 'Intermediate';
-      }
-    } else {
-      if (currentSkillScore >= 85) {
-        difficulty = 4;
-        difficultyLabel = 'Advanced';
-      } else if (currentSkillScore <= 55) {
-        difficulty = 1;
-        difficultyLabel = 'Beginner';
-      } else if (currentSkillScore <= 70) {
-        difficulty = 2;
-        difficultyLabel = 'Intermediate';
-      } else {
-        difficulty = 3;
-        difficultyLabel = 'Intermediate';
+    // If MASTERED, ensure focus transitions away from resolved/mastered weakness to next active area
+    if (adaptiveState === 'MASTERED') {
+      const resolvedWeakness = state.activeWeaknesses?.find((w) => w.status === 'RESOLVED');
+      if (resolvedWeakness && targetWeakness === resolvedWeakness.type) {
+        const nextActive = sortedWeaknesses.find((w) => w.status !== 'RESOLVED');
+        if (nextActive && nextActive.skillName) {
+          targetWeakness = nextActive.type;
+          targetSkill = nextActive.skillName as TargetSkill;
+        } else {
+          // Target next lowest skill
+          let lowestScore = 100;
+          const skillsEntries = Object.entries(state.skills) as Array<[TargetSkill, number]>;
+          for (const [skill, score] of skillsEntries) {
+            if (skill !== targetSkill && score < lowestScore) {
+              lowestScore = score;
+              targetSkill = skill;
+            }
+          }
+        }
       }
     }
 
-    // 7. Select Question Category using Context-Aware Mapping + Anti-Repetition
-    const recentCategories = state.recentAttempts
+    // 7. Base Difficulty Determination from Skill Ratings & Experience Level
+    const currentSkillScore = state.skills[targetSkill] || 70;
+    let baseDifficulty = 2;
+
+    if (experienceLevel === 'fresher') {
+      if (currentSkillScore >= 85) {
+        baseDifficulty = 3;
+      } else if (currentSkillScore <= 60) {
+        baseDifficulty = 1;
+      } else {
+        baseDifficulty = 2;
+      }
+    } else if (experienceLevel === '5+') {
+      if (currentSkillScore >= 75) {
+        baseDifficulty = 4;
+      } else {
+        baseDifficulty = 3;
+      }
+    } else {
+      if (currentSkillScore >= 85) {
+        baseDifficulty = 4;
+      } else if (currentSkillScore <= 55) {
+        baseDifficulty = 1;
+      } else if (currentSkillScore <= 70) {
+        baseDifficulty = 2;
+      } else {
+        baseDifficulty = 3;
+      }
+    }
+
+    // Apply Adaptive Difficulty Adjustment
+    const { difficulty, difficultyLabel } = this.adjustDifficulty(baseDifficulty, adaptiveState, experienceLevel);
+
+    // 8. Determine Scaffolding Level
+    const latestAttemptScore = state.recentAttempts?.[0]?.score;
+    const scaffoldingLevel = this.calculateScaffolding(
+      adaptiveState,
+      difficulty,
+      experienceLevel,
+      latestAttemptScore
+    );
+
+    // 9. Select Question Category using Context-Aware Mapping + Anti-Repetition
+    const recentCategories = (state.recentAttempts || [])
       .map((a) => a.category || '')
       .filter(Boolean);
 
@@ -390,7 +633,7 @@ export const trainingPolicy = {
       recentCategories
     );
 
-    // 8. Synthesize Concrete Objective & Why
+    // 10. Synthesize Concrete Objective & Why
     const { trainingObjective } = this.synthesizeTrainingObjective(
       practiceContext,
       targetRole,
@@ -400,11 +643,22 @@ export const trainingPolicy = {
       targetDomain
     );
 
-    // 9. Time limit based on difficulty & category
+    // 11. Synthesize Explainable "Why This Next?"
+    const reasonForNextChallenge = this.synthesizeWhyThisNext(
+      adaptiveState,
+      targetSkill,
+      targetWeakness,
+      questionCategory,
+      latestAttemptScore,
+      scaffoldingLevel,
+      difficulty
+    );
+
+    // 12. Time limit based on difficulty & category
     const timeLimitSeconds = questionCategory === 'status_update' ? 45 : difficulty >= 4 ? 90 : 60;
 
-    // 10. Ring buffer of recent prompts to avoid
-    const avoidRecentPrompts = state.recentAttempts
+    // 13. Ring buffer of recent prompts to avoid
+    const avoidRecentPrompts = (state.recentAttempts || [])
       .slice(0, 5)
       .map((a) => a.title)
       .filter(Boolean);
@@ -422,9 +676,14 @@ export const trainingPolicy = {
       difficulty,
       difficultyLabel,
       timeLimitSeconds,
+      adaptiveState,
+      adaptiveStateLabel,
+      scaffoldingLevel,
+      reasonForNextChallenge,
       avoidRecentPrompts,
       avoidRecentCategories: recentCategories.slice(0, 3),
     };
   },
 };
+
 

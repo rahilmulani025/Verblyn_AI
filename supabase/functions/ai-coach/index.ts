@@ -22,6 +22,9 @@ interface GenerateTopicPayload {
   current_level?: number;
   template_type?: string;
   training_objective?: string;
+  adaptive_state?: string;
+  scaffolding_level?: string;
+  reason_for_next_challenge?: string;
   time_limit_seconds?: number;
   recent_prompts?: string[];
   avoid_prompts?: string[];
@@ -265,6 +268,9 @@ Return STRICT JSON adhering to this schema:
   "difficulty": number,
   "time_limit_seconds": number,
   "training_objective": string,
+  "adaptive_state": string,
+  "scaffolding_level": string,
+  "reason_for_next_challenge": string,
   "why_this_question": string,
   "why_this_challenge": string,
   "success_criteria": string[],
@@ -280,6 +286,9 @@ Return STRICT JSON adhering to this schema:
       const activeWeakness = payload.active_weakness || "unclear_structure";
       const questionCategory = payload.question_category || "project_deep_dive";
       const difficulty = payload.difficulty || payload.current_level || 2;
+      const adaptiveState = payload.adaptive_state || "CONTINUE_REINFORCEMENT";
+      const scaffoldingLevel = payload.scaffolding_level || "medium";
+      const reasonForNextChallenge = payload.reason_for_next_challenge || "";
       const trainingObjective =
         payload.training_objective ||
         `Practice structured, concise communication tailored for ${targetRole}.`;
@@ -297,6 +306,9 @@ Return STRICT JSON adhering to this schema:
 - Active Weakness: ${activeWeakness}
 - Question Category: ${questionCategory}
 - Difficulty Level: ${difficulty} / 5
+- Adaptive State: ${adaptiveState}
+- Scaffolding Level: ${scaffoldingLevel}
+- Reason For Next Challenge: ${reasonForNextChallenge}
 - Time Limit: ${timeLimitSeconds} seconds
 - Training Objective: ${trainingObjective}
 - Avoid Prompts (Do NOT repeat): ${JSON.stringify(avoidPrompts)}

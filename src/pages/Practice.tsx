@@ -65,6 +65,9 @@ export const Practice: React.FC = () => {
         active_weakness: plan.targetWeakness,
         question_category: plan.questionCategory,
         difficulty: plan.difficulty,
+        adaptive_state: plan.adaptiveState,
+        scaffolding_level: plan.scaffoldingLevel,
+        reason_for_next_challenge: plan.reasonForNextChallenge,
         training_objective: plan.trainingObjective,
         time_limit_seconds: plan.timeLimitSeconds,
         recent_prompts: plan.avoidRecentPrompts,
@@ -81,9 +84,12 @@ export const Practice: React.FC = () => {
           target_skill: generated.target_skill || plan.targetSkill,
           target_weakness: generated.target_weakness || plan.targetWeakness,
           difficulty: generated.difficulty || plan.difficulty,
+          adaptive_state: generated.adaptive_state || plan.adaptiveState,
+          scaffolding_level: generated.scaffolding_level || plan.scaffoldingLevel,
+          reason_for_next_challenge: generated.reason_for_next_challenge || plan.reasonForNextChallenge,
           time_limit_seconds: generated.time_limit_seconds || plan.timeLimitSeconds,
-          why_this_challenge: generated.why_this_challenge || generated.why_this_question || plan.trainingObjective,
-          why_this_question: generated.why_this_question || generated.why_this_challenge || plan.trainingObjective,
+          why_this_challenge: generated.why_this_challenge || generated.why_this_question || plan.reasonForNextChallenge || plan.trainingObjective,
+          why_this_question: generated.why_this_question || generated.why_this_challenge || plan.reasonForNextChallenge || plan.trainingObjective,
         };
         setAiChallenge(normalizedChallenge);
       }
@@ -265,6 +271,12 @@ export const Practice: React.FC = () => {
                     </span>
                   )}
 
+                  {activePlan?.adaptiveStateLabel && (
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-primary/10 text-primary font-semibold border border-primary/25">
+                      {activePlan.adaptiveStateLabel}
+                    </span>
+                  )}
+
                   {activePlan?.experienceLevelLabel && (
                     <span className="text-[10px] px-2 py-0.5 rounded bg-secondary/80 text-foreground font-medium border border-border/40">
                       {activePlan.experienceLevelLabel}
@@ -278,7 +290,7 @@ export const Practice: React.FC = () => {
                   )}
 
                   <span className="text-[10px] px-2 py-0.5 rounded bg-secondary text-muted-foreground font-semibold">
-                    Level {aiChallenge.difficulty}/5
+                    Level {aiChallenge.difficulty}/5 · {activePlan?.scaffoldingLevel ? `${activePlan.scaffoldingLevel.toUpperCase()} GUIDANCE` : 'STRUCTURED'}
                   </span>
                 </div>
 

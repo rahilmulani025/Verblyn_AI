@@ -282,11 +282,13 @@ export const attemptApi = {
           );
 
           const prog = rpcRes as unknown as RpcCompletionResult;
+          const userExpLevel = profile?.experienceLevel || (profile?.profession === 'student' ? 'fresher' : '0-2');
           const recommendation = challengeApi.getRecommendedNextChallenge(
             input.challenge.id,
             scores,
             profile?.primaryGoal || undefined,
-            weaknessCandidates[0]
+            weaknessCandidates[0],
+            userExpLevel
           );
 
           return {
@@ -371,11 +373,13 @@ export const attemptApi = {
           const weaknessCandidates = Array.isArray(analysis.weakness_candidates) ? analysis.weakness_candidates : [];
           const primaryWeakness = weaknessCandidates.length > 0 ? weaknessCandidates[0] : undefined;
 
+          const userExpLevel = profile?.experienceLevel || (profile?.profession === 'student' ? 'fresher' : '0-2');
           const recommendation = challengeApi.getRecommendedNextChallenge(
             input.challenge.id,
             scores,
             profile?.primaryGoal || undefined,
-            primaryWeakness
+            primaryWeakness,
+            userExpLevel
           );
 
           return {
@@ -434,10 +438,13 @@ export const attemptApi = {
 
         if (!rpcErr && rpcRes) {
           const res = rpcRes as unknown as RpcCompletionResult;
+          const userExpLevel = profile?.experienceLevel || (profile?.profession === 'student' ? 'fresher' : '0-2');
           const recommendation = challengeApi.getRecommendedNextChallenge(
             input.challenge.id,
             evaluation.scores,
-            profile?.primaryGoal || undefined
+            profile?.primaryGoal || undefined,
+            undefined,
+            userExpLevel
           );
 
           return {
@@ -609,10 +616,13 @@ export const attemptApi = {
         },
       });
 
+      const userExpLevel = profile?.experienceLevel || (profile?.profession === 'student' ? 'fresher' : '0-2');
       const recommendation = challengeApi.getRecommendedNextChallenge(
         input.challenge.id,
         evaluation.scores,
-        profile?.primaryGoal || undefined
+        profile?.primaryGoal || undefined,
+        undefined,
+        userExpLevel
       );
 
       return {
