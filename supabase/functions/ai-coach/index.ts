@@ -77,7 +77,7 @@ function buildSuccessResponse(action: string, data: unknown) {
   );
 }
 
-function buildErrorResponse(message: string, code = "AI_SERVICE_ERROR", status = 400) {
+function buildErrorResponse(message: string, code = "AI_SERVICE_ERROR", status = 400, diagnostic?: unknown) {
   return new Response(
     JSON.stringify({
       success: false,
@@ -85,8 +85,10 @@ function buildErrorResponse(message: string, code = "AI_SERVICE_ERROR", status =
         code,
         message,
         type: code,
+        ...(diagnostic ? { diagnostic } : {}),
       },
       code,
+      ...(diagnostic ? { diagnostic } : {}),
     }),
     {
       status,
@@ -222,6 +224,31 @@ serve(async (req: Request) => {
     if (action === "test_connection") {
       const startTime = Date.now();
 
+      // Compute safe SHA-256 fingerprint without logging the raw key
+      const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(apiKey));
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const apiKeyFingerprint = `SHA256:${hashArray.map((b) => b.toString(16).padStart(2, "0")).join("").substring(0, 16)}`;
+
+      // Probe /v1beta/models from the Edge Function
+      let modelListContainsModel = false;
+      let modelListStatus = 0;
+      let availableModelsSample: string[] = [];
+      try {
+        const listRes = await fetch("https://generativelanguage.googleapis.com/v1beta/models", {
+          method: "GET",
+          headers: { "x-goog-api-key": apiKey },
+        });
+        modelListStatus = listRes.status;
+        if (listRes.ok) {
+          const listJson = await listRes.json();
+          const models: Array<{ name: string; supportedGenerationMethods?: string[] }> = listJson.models || [];
+          availableModelsSample = models.map((m) => m.name.replace(/^models\//, '')).slice(0, 10);
+          modelListContainsModel = models.some((m) => m.name.includes(GEMINI_MODEL));
+        }
+      } catch {
+        // ignore probe network errors
+      }
+
       const res = await fetch(geminiEndpoint, {
         method: "POST",
         headers: {
@@ -234,10 +261,29 @@ serve(async (req: Request) => {
       });
 
       const latencyMs = Date.now() - startTime;
+      let rawErrorBody: { error?: { code?: number; message?: string; status?: string } } | null = null;
 
       if (!res.ok) {
+        try {
+          rawErrorBody = await res.clone().json();
+        } catch {
+          // ignore
+        }
         const mapped = await parseGeminiError(res);
-        return buildErrorResponse(mapped.message, mapped.code, res.status);
+        const diagnostic = {
+          model: GEMINI_MODEL,
+          endpoint: geminiEndpoint,
+          providerHttpStatus: res.status,
+          providerStatus: rawErrorBody?.error?.status || `HTTP_${res.status}`,
+          providerMessage: rawErrorBody?.error?.message || mapped.message,
+          apiKeyFingerprint,
+          apiKeyLength: apiKey.length,
+          modelListContainsModel,
+          modelListHttpStatus: modelListStatus,
+          availableModelsSample,
+        };
+
+        return buildErrorResponse(mapped.message, mapped.code, res.status, diagnostic);
       }
 
       return buildSuccessResponse("test_connection", {
@@ -245,6 +291,9 @@ serve(async (req: Request) => {
         model: GEMINI_MODEL,
         latencyMs,
         message: "Gemini connected successfully",
+        apiKeyFingerprint,
+        modelListContainsModel,
+        availableModelsSample,
       });
     }
 
