@@ -61,7 +61,7 @@ interface RequestBody {
   payload?: GenerateTopicPayload | AnalyzeAttemptPayload | Record<string, unknown>;
 }
 
-const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-2.5-flash";
+const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-1.5-flash";
 
 function buildSuccessResponse(action: string, data: unknown) {
   return new Response(
@@ -149,7 +149,7 @@ async function parseGeminiError(res: Response): Promise<{ code: string; message:
   if (status === 404 || statusStr === "NOT_FOUND") {
     return {
       code: "MODEL_UNAVAILABLE",
-      message: `Gemini model ${GEMINI_MODEL} was not found or is unavailable in your region.`,
+      message: `The configured Gemini model (${GEMINI_MODEL}) is not available for this API key or project. Please use a supported Gemini model.`,
     };
   }
 
