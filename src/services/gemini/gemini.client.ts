@@ -100,6 +100,7 @@ export function classifyGeminiError(error: unknown): GeminiErrorInfo {
   // 3. Invalid API Key / Permissions
   if (
     codeStr === 'INVALID_API_KEY' ||
+    codeStr === 'PERMISSION_DENIED' ||
     status === 401 ||
     status === 403 ||
     lower.includes('invalid_api_key') ||
@@ -109,19 +110,41 @@ export function classifyGeminiError(error: unknown): GeminiErrorInfo {
     lower.includes('api key') ||
     lower.includes('apikey')
   ) {
+    const isPermission = codeStr === 'PERMISSION_DENIED' || lower.includes('permission_denied');
     return {
-      type: 'INVALID_API_KEY',
-      code: 'INVALID_API_KEY',
+      type: isPermission ? 'PERMISSION_DENIED' : 'INVALID_API_KEY',
+      code: isPermission ? 'PERMISSION_DENIED' : 'INVALID_API_KEY',
       message: rawMessage || 'Gemini API key is invalid or lacks permission.',
-      userFacingTitle: 'Invalid Gemini API Key',
-      userFacingMessage:
-        'Your Gemini API key was rejected by Google. Please check your API key in Settings -> AI Coach or enter a new one.',
+      userFacingTitle: isPermission ? 'Gemini Permission Denied' : 'Invalid Gemini API Key',
+      userFacingMessage: isPermission
+        ? 'Your Gemini API key does not have permission to access the requested model or API.'
+        : 'Your Gemini API key was rejected by Google. Please check your API key in Settings -> AI Coach or enter a new one.',
       retryable: false,
-      httpStatus: status || 401,
+      httpStatus: status || (isPermission ? 403 : 401),
     };
   }
 
-  // 4. Server / Service Unavailable
+  // 4. Model Unavailable (HTTP 404 / NOT_FOUND / MODEL_UNAVAILABLE)
+  if (
+    codeStr === 'MODEL_UNAVAILABLE' ||
+    (status === 404 && (lower.includes('model') || lower.includes('not found') || lower.includes('not_found'))) ||
+    lower.includes('model_unavailable') ||
+    lower.includes('model not found') ||
+    lower.includes('is not found for api version')
+  ) {
+    return {
+      type: 'MODEL_UNAVAILABLE',
+      code: 'MODEL_UNAVAILABLE',
+      message: rawMessage || 'The configured Gemini model is not available.',
+      userFacingTitle: 'Gemini Model Unavailable',
+      userFacingMessage:
+        'The configured Gemini model is not available for this API key or project. Please try again or use a supported Gemini model.',
+      retryable: false,
+      httpStatus: status || 404,
+    };
+  }
+
+  // 5. Server / Service Unavailable
   if (
     codeStr === 'SERVICE_UNAVAILABLE' ||
     status === 503 ||
@@ -129,8 +152,7 @@ export function classifyGeminiError(error: unknown): GeminiErrorInfo {
     status === 504 ||
     status === 500 ||
     lower.includes('service_unavailable') ||
-    lower.includes('service unavailable') ||
-    lower.includes('model_unavailable')
+    lower.includes('service unavailable')
   ) {
     return {
       type: 'SERVICE_UNAVAILABLE',
@@ -140,6 +162,19 @@ export function classifyGeminiError(error: unknown): GeminiErrorInfo {
       userFacingMessage: 'Google Gemini service is temporarily unavailable. Please try again shortly.',
       retryable: true,
       httpStatus: status || 503,
+    };
+  }
+
+  // 6. Invalid Request (HTTP 400 not related to API Key)
+  if (codeStr === 'INVALID_REQUEST' || status === 400 || lower.includes('invalid_request')) {
+    return {
+      type: 'INVALID_REQUEST',
+      code: 'INVALID_REQUEST',
+      message: rawMessage || 'The request format was rejected by Gemini.',
+      userFacingTitle: 'Invalid AI Request',
+      userFacingMessage: 'The AI request could not be processed due to invalid parameters.',
+      retryable: false,
+      httpStatus: status || 400,
     };
   }
 

@@ -326,6 +326,53 @@ const pureSilenceValidity = evaluateAttemptValidity('', 0, mockProjectChallenge.
 assert(pureSilenceValidity.validity === 'INVALID', 'True silence is INVALID');
 assert(pureSilenceValidity.reasonCode === 'empty_transcript', 'Reason code is empty_transcript');
 
+// TEST 9: Production Model Configuration Centralization
+console.log('\nTEST 9: gemini-2.5-flash configuration is used by default');
+import { GEMINI_MODELS } from '../src/config/ai';
+assert(GEMINI_MODELS.COACH === 'gemini-2.5-flash', 'COACH model is gemini-2.5-flash');
+assert(GEMINI_MODELS.TRANSCRIBE === 'gemini-2.5-flash', 'TRANSCRIBE model is gemini-2.5-flash');
+assert(GEMINI_MODELS.FAST === 'gemini-2.5-flash', 'FAST model is gemini-2.5-flash');
+
+// TEST 10: 404 NOT_FOUND containing model unavailable is classified as MODEL_UNAVAILABLE
+console.log('\nTEST 10: 404 NOT_FOUND containing model unavailable is classified as MODEL_UNAVAILABLE');
+const model404Err = new GeminiServiceError(
+  'models/gemini-3.8-flash is not found for API version v1beta, or is not supported for generateContent.',
+  'MODEL_UNAVAILABLE',
+  404
+);
+const classifiedModelErr = classifyGeminiError(model404Err);
+assert(classifiedModelErr.type === 'MODEL_UNAVAILABLE', 'Classified as MODEL_UNAVAILABLE');
+assert(classifiedModelErr.code === 'MODEL_UNAVAILABLE', 'Code is MODEL_UNAVAILABLE');
+assert(classifiedModelErr.userFacingTitle === 'Gemini Model Unavailable', 'Title is Gemini Model Unavailable');
+assert(
+  classifiedModelErr.userFacingMessage.includes('configured Gemini model is not available'),
+  'User message informs that model is not available for key/project'
+);
+assert(classifiedModelErr.retryable === false, 'Model unavailable is non-retryable');
+
+// TEST 11: MODEL_UNAVAILABLE is NOT classified as SERVICE_UNAVAILABLE
+console.log('\nTEST 11: MODEL_UNAVAILABLE is NOT classified as SERVICE_UNAVAILABLE');
+assert(classifiedModelErr.type !== 'SERVICE_UNAVAILABLE', 'MODEL_UNAVAILABLE is distinct from SERVICE_UNAVAILABLE');
+assert(
+  classifiedModelErr.userFacingTitle !== 'AI Service Temporarily Unavailable',
+  'Does NOT show misleading temporary outage title'
+);
+
+// TEST 12: 503 remains SERVICE_UNAVAILABLE and is retryable
+console.log('\nTEST 12: 503 remains SERVICE_UNAVAILABLE');
+const service503Err = new GeminiServiceError('Service Unavailable', 'SERVICE_UNAVAILABLE', 503);
+const classified503 = classifyGeminiError(service503Err);
+assert(classified503.type === 'SERVICE_UNAVAILABLE', '503 is SERVICE_UNAVAILABLE');
+assert(classified503.userFacingTitle === 'AI Service Temporarily Unavailable', 'Title is AI Service Temporarily Unavailable');
+assert(classified503.retryable === true, '503 is retryable');
+
+// TEST 13: 400 INVALID_REQUEST is distinct
+console.log('\nTEST 13: 400 INVALID_REQUEST is distinct');
+const invalidReqErr = new GeminiServiceError('Invalid JSON argument in request', 'INVALID_REQUEST', 400);
+const classifiedInvalidReq = classifyGeminiError(invalidReqErr);
+assert(classifiedInvalidReq.type === 'INVALID_REQUEST', '400 is INVALID_REQUEST');
+assert(classifiedInvalidReq.retryable === false, 'Invalid request is non-retryable');
+
 console.log('\n======================================================');
 console.log(`TOTAL TESTS: ${totalTests} | PASSED: ${passedTests} | FAILED: ${totalTests - passedTests}`);
 console.log('======================================================\n');

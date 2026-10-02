@@ -282,13 +282,13 @@ export const challengeApi = {
     const current = CHALLENGE_CATALOG.find((c) => c.id === currentChallengeId);
 
     // Derive deterministic adaptive state from attempt scores
-    const overallScore = scores?.overallScore || 75;
+    const overallScore = typeof scores?.overallScore === 'number' ? scores.overallScore : 75;
     const currentSkillScores: Record<TargetSkill, number> = {
-      Fluency: scores?.fluency || 70,
-      Clarity: scores?.clarity || 70,
-      Vocabulary: scores?.vocabulary || 70,
-      Grammar: scores?.grammar || 70,
-      Confidence: scores?.confidence || 70,
+      Fluency: typeof scores?.fluency === 'number' ? scores.fluency : 70,
+      Clarity: typeof scores?.clarity === 'number' ? scores.clarity : 70,
+      Vocabulary: typeof scores?.vocabulary === 'number' ? scores.vocabulary : 70,
+      Grammar: typeof scores?.grammar === 'number' ? scores.grammar : 70,
+      Confidence: typeof scores?.confidence === 'number' ? scores.confidence : 70,
     };
 
     let targetSkill: TargetSkill = 'Clarity';

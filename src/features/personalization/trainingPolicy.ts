@@ -233,7 +233,8 @@ export const trainingPolicy = {
       return 'PROGRESS';
     }
 
-    // 4. STAGNATION: 2+ recent attempts on same skill with plateaued scores (< 70, delta < 5)
+    // 4. STAGNATION: Active weakness has occurred 3+ times with plateaued scores (< 70), or 2+ attempts without growth (delta <= 2)
+    const occurrenceCount = activeWeaknessObj?.occurrenceCount || 1;
     if (recent.length >= 2) {
       const sameSkillAttempts = recent.filter(
         (a) => a.targetSkill?.toLowerCase() === targetSkill.toLowerCase() || !a.targetSkill
@@ -241,7 +242,7 @@ export const trainingPolicy = {
       if (sameSkillAttempts.length >= 2) {
         const s1 = sameSkillAttempts[0]?.score || 65;
         const s2 = sameSkillAttempts[1]?.score || 65;
-        if (s1 < 70 && s2 < 70 && Math.abs(s1 - s2) <= 5) {
+        if (s1 < 70 && s2 < 70 && (occurrenceCount >= 3 || sameSkillAttempts.length >= 3 || Math.abs(s1 - s2) <= 2 || s1 <= s2)) {
           return 'STAGNATION';
         }
       }

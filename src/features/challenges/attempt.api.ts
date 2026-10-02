@@ -12,6 +12,7 @@ import { SpeechMetricsSummary } from '@/lib/metrics';
 import { challengeApi } from './challenge.api';
 import { profileApi } from '@/features/profile/profile.api';
 import { evaluateAttemptValidity } from './evaluationValidity';
+import { GEMINI_MODELS } from '@/config/ai';
 
 interface RpcCompletionResult {
   status: string;
@@ -313,7 +314,7 @@ export const attemptApi = {
               p_weakness_candidates: weaknessCandidates as unknown as Json,
               p_coach_message: ai.coach_summary || `Evaluated by Gemini AI Coach.`,
               p_recommended_focus: ai.next_focus || input.challenge.targetSkill,
-              p_analysis_version: 'gemini-3.8-flash-byok',
+              p_analysis_version: `${GEMINI_MODELS.COACH}-byok`,
               p_is_daily_mission: Boolean(input.isDailyMission) && !isInvalid,
               p_is_weakness: isWeaknessTarget,
               p_is_personal_best: isPersonalBest,
@@ -348,7 +349,7 @@ export const attemptApi = {
             coachMessage: ai.coach_summary,
             recommendedFocus: ai.next_focus,
             weaknessCandidates,
-            analysisVersion: 'gemini-3.8-flash-byok',
+            analysisVersion: `${GEMINI_MODELS.COACH}-byok`,
             xpEarned: isInvalid
               ? { base: 0, dailyBonus: 0, weaknessBonus: 0, personalBestBonus: 0, total: 0 }
               : (prog?.earned_xp || {
