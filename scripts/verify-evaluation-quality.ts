@@ -327,11 +327,11 @@ assert(pureSilenceValidity.validity === 'INVALID', 'True silence is INVALID');
 assert(pureSilenceValidity.reasonCode === 'empty_transcript', 'Reason code is empty_transcript');
 
 // TEST 9: Production Model Configuration Centralization
-console.log('\nTEST 9: gemini-1.5-flash configuration is used by default');
+console.log('\nTEST 9: gemini-3.5-flash configuration is used by default');
 import { GEMINI_MODELS } from '../src/config/ai';
-assert(GEMINI_MODELS.COACH === 'gemini-1.5-flash', 'COACH model is gemini-1.5-flash');
-assert(GEMINI_MODELS.TRANSCRIBE === 'gemini-1.5-flash', 'TRANSCRIBE model is gemini-1.5-flash');
-assert(GEMINI_MODELS.FAST === 'gemini-1.5-flash', 'FAST model is gemini-1.5-flash');
+assert(GEMINI_MODELS.COACH === 'gemini-3.5-flash', 'COACH model is gemini-3.5-flash');
+assert(GEMINI_MODELS.TRANSCRIBE === 'gemini-3.5-flash', 'TRANSCRIBE model is gemini-3.5-flash');
+assert(GEMINI_MODELS.FAST === 'gemini-3.5-flash', 'FAST model is gemini-3.5-flash');
 
 // TEST 10: 404 NOT_FOUND containing model unavailable is classified as MODEL_UNAVAILABLE
 console.log('\nTEST 10: 404 NOT_FOUND containing model unavailable is classified as MODEL_UNAVAILABLE');
